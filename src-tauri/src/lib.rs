@@ -5,7 +5,6 @@ mod transfer;
 mod commands;
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -15,7 +14,6 @@ use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
-use network::discovery;
 use network::listener;
 use state::AppState;
 
@@ -80,15 +78,12 @@ pub fn run() {
             {
                 let state_clone = state.clone();
                 let app_handle_clone = app_handle.clone();
-                let shutdown_rx1 = shutdown_tx.subscribe();
                 let shutdown_rx2 = shutdown_tx.subscribe();
-                let shutdown_rx3 = shutdown_tx.subscribe();
 
                 rt.spawn(async move {
+                    // Escuchar solo conexiones TCP (transferencia y señal de vida)
                     tokio::join!(
-                        discovery::run_broadcaster(state_clone.clone(), shutdown_rx1),
-                        listener::run_udp_listener(state_clone.clone(), app_handle_clone.clone(), shutdown_rx2),
-                        listener::run_tcp_listener(state_clone.clone(), app_handle_clone.clone(), shutdown_rx3),
+                        listener::run_tcp_listener(state_clone.clone(), app_handle_clone.clone(), shutdown_rx2),
                     );
                 });
             }

@@ -9,7 +9,7 @@ pub enum UdpMsgType {
     ChunkAvailable,
 }
 
-/// Tipos de mensajes TCP (transferencia)
+/// Tipos de mensajes TCP (transferencia y coordinación P2P)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TcpMsgType {
@@ -20,6 +20,8 @@ pub enum TcpMsgType {
     ChunkResponse,
     TransferComplete,
     TransferError,
+    /// BitTorrent-style "HAVE" message
+    HaveChunk,
 }
 
 // ─── Mensajes UDP ─────────────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ pub struct PeerBye {
     pub ip: String,
 }
 
-/// Notificación de chunks disponibles (receptor re-broadcast)
+/// Notificación de chunks disponibles (receptor re-broadcast via UDP)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkAvailable {
     pub msg_type: UdpMsgType,
@@ -56,6 +58,14 @@ pub struct ChunkAvailable {
 }
 
 // ─── Mensajes TCP ─────────────────────────────────────────────────────────────
+
+/// Estructura para describir a un vecino en el enjambre
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwarmPeer {
+    pub peer_id: String,
+    pub ip: String,
+    pub tcp_port: u16,
+}
 
 /// Anuncio de transferencia del sender al receiver
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +80,8 @@ pub struct TransferAnnounce {
     pub chunk_size: u32,
     pub chunk_hashes: Vec<String>,  // SHA1 hex por chunk
     pub destination_path: String,
+    /// Lista de todas las IPs/Peers involucrados en esta transferencia (Enjambre)
+    pub swarm: Vec<SwarmPeer>,
 }
 
 /// Aceptación de transferencia
@@ -108,6 +120,15 @@ pub struct ChunkResponse {
     pub chunk_size: u32,
 }
 
+/// Mensaje "HAVE": indica que un peer ha completado un chunk
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HaveChunk {
+    pub msg_type: TcpMsgType,
+    pub transfer_id: String,
+    pub peer_id: String,
+    pub chunk_index: u32,
+}
+
 /// Transferencia completada exitosamente
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransferComplete {
@@ -141,6 +162,7 @@ pub enum TcpMessage {
     TransferRejected(TransferRejected),
     ChunkRequest(ChunkRequest),
     ChunkResponse(ChunkResponse),
+    HaveChunk(HaveChunk),
     TransferComplete(TransferComplete),
     TransferError(TransferError),
 }

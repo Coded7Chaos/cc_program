@@ -19,8 +19,8 @@ pub enum CodecError {
 
 /// Tamaño máximo de header JSON (64 KB)
 const MAX_HEADER_SIZE: u32 = 64 * 1024;
-/// Tamaño máximo de datos raw (600 KB, un chunk de 512 KB + overhead)
-const MAX_DATA_SIZE: u32 = 600 * 1024;
+/// Tamaño máximo de datos raw (1.5 MB, un chunk de 1 MB + overhead)
+const MAX_DATA_SIZE: u32 = 1536 * 1024;
 
 /// Escribe un frame TCP: [header_len:u32][data_len:u32][header_json][raw_data]
 pub async fn write_frame<W, H>(

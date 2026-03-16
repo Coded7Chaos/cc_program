@@ -4,6 +4,7 @@ export interface PeerEntry {
   peer_id: string;
   hostname: string;
   ip: string;
+  mac_address?: string;
   tcp_port: number;
   kind: PeerKind;
   last_seen: number;

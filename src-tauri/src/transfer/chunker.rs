@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use thiserror::Error;
 
-pub const CHUNK_SIZE: u32 = 512 * 1024; // 512 KB
+pub const CHUNK_SIZE: u32 = 1024 * 1024; // 1 MB
 
 #[derive(Debug, Error)]
 pub enum ChunkerError {
@@ -140,4 +140,49 @@ pub fn preallocate_file(dest_path: &Path, file_size: u64) -> Result<(), ChunkerE
 
     file.set_len(file_size)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_chunk_count() {
+        assert_eq!(chunk_count(0, 1024), 0);
+        assert_eq!(chunk_count(100, 1024), 1);
+        assert_eq!(chunk_count(1024, 1024), 1);
+        assert_eq!(chunk_count(1025, 1024), 2);
+    }
+
+    #[test]
+    fn test_sha1_hex() {
+        let data = b"hello world";
+        let hash = sha1_hex(data);
+        assert_eq!(hash, "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed");
+    }
+
+    #[test]
+    fn test_read_write_chunk() -> Result<(), Box<dyn std::error::Error>> {
+        let mut temp = NamedTempFile::new()?;
+        let chunk_size = CHUNK_SIZE;
+        // Crear un archivo del tamaño de 2 chunks
+        let total_size = (chunk_size * 2) as u64;
+        temp.as_file().set_len(total_size)?;
+        let path = temp.path();
+
+        let chunk_data = vec![0xAAu8; chunk_size as usize];
+        let hash = sha1_hex(&chunk_data);
+
+        // Escribir en el segundo chunk (índice 1)
+        write_chunk_at_offset(path, 1, chunk_size, &chunk_data)?;
+
+        // Leer y verificar
+        let read_data = read_chunk(path, 1, chunk_size, &hash)?;
+        assert_eq!(read_data.len(), chunk_data.len());
+        assert_eq!(read_data, chunk_data);
+
+        Ok(())
+    }
 }

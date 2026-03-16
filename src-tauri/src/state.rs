@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex, RwLock};
 
+use crate::protocol::messages::SwarmPeer;
+use crate::transfer::tracker::TransferTracker;
+
 /// Tipo de peer en la red
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PeerKind {
@@ -18,6 +21,7 @@ pub struct PeerEntry {
     pub peer_id: String,
     pub hostname: String,
     pub ip: String,
+    pub mac_address: Option<String>,
     pub tcp_port: u16,
     pub kind: PeerKind,
     pub last_seen: u64,  // epoch seconds
@@ -57,6 +61,7 @@ pub struct ActiveTransfer {
     pub chunks_done: Vec<bool>,
     pub status: TransferStatus,
     pub target_peers: Vec<String>,  // peer_ids destino (para sender)
+    pub swarm: Vec<SwarmPeer>,      // Peers en el enjambre
     pub sender_ip: String,
     pub sender_peer_id: String,
     pub bytes_transferred: u64,
@@ -105,6 +110,7 @@ pub struct AppState {
     pub local_ip: String,
     pub peers: Arc<DashMap<String, PeerEntry>>,
     pub active_transfers: Arc<DashMap<String, ActiveTransfer>>,
+    pub tracker: Arc<Mutex<TransferTracker>>,
     pub config: Arc<RwLock<AppConfig>>,
     pub shutdown_tx: broadcast::Sender<()>,
     /// Mapa transfer_id -> cancel_sender para cancelar transfers individuales
@@ -124,6 +130,7 @@ impl AppState {
             local_ip,
             peers: Arc::new(DashMap::new()),
             active_transfers: Arc::new(DashMap::new()),
+            tracker: Arc::new(Mutex::new(TransferTracker::default())),
             config: Arc::new(RwLock::new(AppConfig::default())),
             shutdown_tx,
             cancel_senders: Arc::new(DashMap::new()),

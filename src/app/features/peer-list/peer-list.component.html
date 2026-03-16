@@ -31,6 +31,7 @@
         <th>Estado</th>
         <th>Hostname</th>
         <th>IP</th>
+        <th>MAC</th>
         <th>Tipo</th>
         <th>Versión</th>
       </tr>
@@ -51,6 +52,7 @@
           </td>
           <td>{{ peer.hostname }}</td>
           <td>{{ peer.ip }}</td>
+          <td>{{ peer.mac_address ?? '—' }}</td>
           <td>
             <span class="badge" [class.badge--app]="peer.kind === 'App'" [class.badge--nonapp]="peer.kind === 'NonApp'">
               {{ peer.kind === 'App' ? 'App' : 'Sin app' }}
@@ -60,7 +62,7 @@
         </tr>
       } @empty {
         <tr>
-          <td colspan="6" class="empty-state">No hay peers disponibles. Haz clic en Actualizar.</td>
+          <td colspan="7" class="empty-state">No hay peers disponibles. Haz clic en Actualizar.</td>
         </tr>
       }
     </tbody>
