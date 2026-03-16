@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "fs-access",
+  "description": "Filesystem access for reading and writing files",
+  "windows": ["main"],
+  "permissions": [
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-mkdir",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:allow-stat",
+    "fs:allow-create",
+    "fs:allow-write",
+    "fs:allow-read",
+    "fs:allow-remove",
+    "fs:allow-rename"
+  ]
+}

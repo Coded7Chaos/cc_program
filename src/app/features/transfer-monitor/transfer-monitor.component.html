@@ -1,0 +1,50 @@
+<div class="transfer-monitor">
+  <h2>Transferencias activas</h2>
+
+  @if (transferService.transfers().length === 0) {
+    <div class="empty-state">
+      No hay transferencias en progreso.
+    </div>
+  }
+
+  <div class="transfer-list">
+    @for (transfer of transferService.transfers(); track trackByTransfer($index, transfer)) {
+      <div class="transfer-card" [class]="getStatusClass(transfer.status)">
+        <div class="transfer-card__header">
+          <div class="transfer-card__title">
+            <span class="file-name">{{ transfer.file_name }}</span>
+            <span class="role-badge" [class.role-badge--sender]="transfer.role === 'Sender'">
+              {{ transfer.role === 'Sender' ? 'Enviando' : 'Recibiendo' }}
+            </span>
+          </div>
+          <div class="transfer-card__actions">
+            <span class="status-label">{{ getStatusLabel(transfer.status) }}</span>
+            @if (isActive(transfer.status)) {
+              <button (click)="cancel(transfer.transfer_id)" class="btn-cancel">Cancelar</button>
+            }
+          </div>
+        </div>
+
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-bar__fill" [style.width.%]="getProgress(transfer)"></div>
+          </div>
+          <span class="progress-label">{{ getProgress(transfer) }}%</span>
+        </div>
+
+        <div class="transfer-card__stats">
+          <span>
+            {{ transfer.bytes_transferred | bytesFormat }} / {{ transfer.file_size | bytesFormat }}
+          </span>
+          <span class="speed">
+            {{ transferService.getSpeed(transfer.transfer_id) | bytesFormat }}/s
+          </span>
+          <span class="chunks">
+            Chunks: {{ getChunksDone(transfer) }}/{{ transfer.total_chunks }}
+          </span>
+          <span class="dest">-&gt; {{ transfer.destination_path }}</span>
+        </div>
+      </div>
+    }
+  </div>
+</div>

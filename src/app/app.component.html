@@ -1,0 +1,64 @@
+<div class="app-layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar__brand">
+      <span class="brand-icon">📡</span>
+      <span class="brand-name">P2P Deployer</span>
+    </div>
+
+    <nav class="sidebar__nav">
+      <button
+        class="nav-item"
+        [class.active]="activeTab() === 'peers'"
+        (click)="setTab('peers')"
+      >
+        <span class="nav-icon">🖥️</span>
+        <span>Red LAN</span>
+        <span class="nav-badge" *ngIf="peerService.onlinePeers().length > 0">
+          {{ peerService.onlinePeers().length }}
+        </span>
+      </button>
+
+      <button
+        class="nav-item"
+        [class.active]="activeTab() === 'transfers'"
+        (click)="setTab('transfers')"
+      >
+        <span class="nav-icon">📤</span>
+        <span>Transferencias</span>
+        <span class="nav-badge nav-badge--active" *ngIf="transferCount > 0">
+          {{ transferCount }}
+        </span>
+      </button>
+    </nav>
+
+    <div class="sidebar__status">
+      <div class="status-item">
+        <span class="status-dot" [class.online]="peerService.onlinePeers().length > 0"></span>
+        <span>{{ peerService.onlinePeers().length }} peers online</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main-content">
+    @if (activeTab() === 'peers') {
+      <div class="content-panel">
+        <!-- Lista de peers con selección -->
+        <app-peer-list (peersSelected)="onPeersSelected($event)" />
+
+        <!-- Selector de archivo -->
+        <div class="divider"></div>
+        <app-file-selector
+          (transferStarted)="onTransferStarted($event)"
+        />
+      </div>
+    }
+
+    @if (activeTab() === 'transfers') {
+      <div class="content-panel">
+        <app-transfer-monitor />
+      </div>
+    }
+  </main>
+</div>

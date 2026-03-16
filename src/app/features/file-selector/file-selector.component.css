@@ -1,0 +1,125 @@
+.file-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.file-selector h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.file-drop-zone {
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.file-drop-zone:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.file-drop-zone.has-file {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.file-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #9ca3af;
+}
+
+.file-placeholder .icon {
+  font-size: 2rem;
+}
+
+.file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-name {
+  font-weight: 600;
+  color: #111827;
+}
+
+.file-size {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.file-sha1 {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  font-family: monospace;
+}
+
+.destination {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.destination label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.destination input {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.destination input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.error-message {
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 0.875rem;
+}
+
+.send-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.peers-selected {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.btn-send {
+  padding: 8px 20px;
+  background: #22c55e;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.btn-send:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}

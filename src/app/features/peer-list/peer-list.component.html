@@ -1,0 +1,68 @@
+<div class="peer-list">
+  <div class="peer-list__header">
+    <h2>Peers en la red</h2>
+    <div class="peer-list__actions">
+      <span class="peer-count">{{ peerService.onlinePeers().length }} online</span>
+      <button (click)="refresh()" [disabled]="peerService.scanning()" class="btn-refresh">
+        {{ peerService.scanning() ? 'Escaneando...' : 'Actualizar' }}
+      </button>
+    </div>
+  </div>
+
+  @if (peerService.scanning()) {
+    <div class="scan-progress">
+      <div class="scan-bar">
+        <div class="scan-bar__fill"
+             [style.width.%]="peerService.scanProgress().total > 0
+               ? (peerService.scanProgress().scanned / peerService.scanProgress().total * 100)
+               : 0">
+        </div>
+      </div>
+      <span>Escaneando... {{ peerService.scanProgress().scanned }}/{{ peerService.scanProgress().total }}</span>
+    </div>
+  }
+
+  <table class="peer-table">
+    <thead>
+      <tr>
+        <th>
+          <input type="checkbox" (change)="toggleAll($event)" />
+        </th>
+        <th>Estado</th>
+        <th>Hostname</th>
+        <th>IP</th>
+        <th>Tipo</th>
+        <th>Versión</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (peer of peerService.peers(); track trackByPeer($index, peer)) {
+        <tr [class.offline]="!peer.online" [class.selected]="isSelected(peer.peer_id)">
+          <td>
+            <input
+              type="checkbox"
+              [checked]="isSelected(peer.peer_id)"
+              [disabled]="peer.kind === 'NonApp'"
+              (change)="togglePeer(peer.peer_id, $event)"
+            />
+          </td>
+          <td>
+            <span class="status-dot" [class.online]="peer.online"></span>
+          </td>
+          <td>{{ peer.hostname }}</td>
+          <td>{{ peer.ip }}</td>
+          <td>
+            <span class="badge" [class.badge--app]="peer.kind === 'App'" [class.badge--nonapp]="peer.kind === 'NonApp'">
+              {{ peer.kind === 'App' ? 'App' : 'Sin app' }}
+            </span>
+          </td>
+          <td>{{ peer.app_version ?? '—' }}</td>
+        </tr>
+      } @empty {
+        <tr>
+          <td colspan="6" class="empty-state">No hay peers disponibles. Haz clic en Actualizar.</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,46 @@
+<div class="file-selector">
+  <h2>Enviar archivo</h2>
+
+  <div class="file-drop-zone" (click)="selectFile()" [class.has-file]="fileInfo()">
+    @if (fileInfo(); as file) {
+      <div class="file-info">
+        <span class="file-name">{{ file.name }}</span>
+        <span class="file-size">{{ file.size | bytesFormat }}</span>
+        <span class="file-sha1">SHA1: {{ file.sha1 }}</span>
+      </div>
+    } @else {
+      <div class="file-placeholder">
+        <span class="icon">📂</span>
+        <span>{{ loading() ? 'Cargando...' : 'Haz clic para seleccionar un archivo' }}</span>
+      </div>
+    }
+  </div>
+
+  <div class="destination">
+    <label for="dest-path">Ruta de destino en los receptores:</label>
+    <input
+      id="dest-path"
+      type="text"
+      [ngModel]="destinationPath()"
+      (ngModelChange)="destinationPath.set($event)"
+      placeholder="C:\Descargas"
+    />
+  </div>
+
+  @if (error()) {
+    <div class="error-message">{{ error() }}</div>
+  }
+
+  <div class="send-actions">
+    <span class="peers-selected">
+      {{ targetPeerIds.length > 0 ? targetPeerIds.length + ' peer(s) seleccionados' : 'Selecciona peers en la lista' }}
+    </span>
+    <button
+      (click)="send()"
+      [disabled]="!canSend"
+      class="btn-send"
+    >
+      {{ sending() ? 'Enviando...' : 'Enviar' }}
+    </button>
+  </div>
+</div>

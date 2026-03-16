@@ -1,0 +1,167 @@
+.transfer-monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.transfer-monitor h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.empty-state {
+  text-align: center;
+  color: #9ca3af;
+  padding: 32px;
+  background: #f9fafb;
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.transfer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transfer-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transfer-card.status--completed {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.transfer-card.status--error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.transfer-card.status--cancelled {
+  border-color: #d1d5db;
+  background: #f9fafb;
+  opacity: 0.7;
+}
+
+.transfer-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.transfer-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.file-name {
+  font-weight: 600;
+  color: #111827;
+  font-size: 0.9rem;
+}
+
+.role-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.role-badge--sender {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.transfer-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-label {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.btn-cancel {
+  padding: 4px 10px;
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.btn-cancel:hover {
+  background: #fecaca;
+}
+
+.progress-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.status--completed .progress-bar__fill {
+  background: #22c55e;
+}
+
+.status--error .progress-bar__fill {
+  background: #ef4444;
+}
+
+.progress-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #374151;
+  min-width: 36px;
+  text-align: right;
+}
+
+.transfer-card__stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.8rem;
+  color: #6b7280;
+  flex-wrap: wrap;
+}
+
+.speed {
+  font-weight: 500;
+  color: #3b82f6;
+}
+
+.dest {
+  font-family: monospace;
+  font-size: 0.75rem;
+}
