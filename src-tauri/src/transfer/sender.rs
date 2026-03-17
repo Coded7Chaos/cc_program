@@ -2,11 +2,15 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use tokio::net::TcpStream;
 use tokio::io::BufStream;
 use tracing::{info, error, warn};
+
+/// Timeout para conectar al receptor al enviar el anuncio.
+/// 5 s es generoso para LAN Gigabit; evita que el sender quede colgado si la IP es incorrecta.
+const ANNOUNCE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 use uuid::Uuid;
 
 use crate::protocol::codec::write_frame;
@@ -128,9 +132,12 @@ pub async fn start_send(
     let _ = app_handle.emit("transfer-incoming", &active);
     state.active_transfers.insert(transfer_id.clone(), active);
 
-    // 5. Notificar a todos los peers para que se unan al enjambre
+    // 5. Notificar a todos los peers para que se unan al enjambre.
+    //    Se espera la respuesta de cada announce (con timeout) para detectar fallos reales.
     info!("[sender] Enviando TransferAnnounce a {} receptores...", target_peer_ids.len());
-    let peer_count = target_peer_ids.len();
+    info!("[sender] Mi IP anunciada al enjambre: {} (puerto {})", state.local_ip, my_port);
+
+    let mut announce_handles = Vec::new();
     for peer_id in target_peer_ids {
         let peer = match state.peers.get(&peer_id) {
             Some(p) => p.clone(),
@@ -157,29 +164,66 @@ pub async fn start_send(
         let ip = peer.ip.clone();
         let port = peer.tcp_port;
         let tid = transfer_id.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             info!("[sender → {}:{}] Conectando para enviar TransferAnnounce...", ip, port);
-            match TcpStream::connect(format!("{}:{}", ip, port)).await {
-                Ok(stream) => {
+            let connect_result = tokio::time::timeout(
+                ANNOUNCE_CONNECT_TIMEOUT,
+                TcpStream::connect(format!("{}:{}", ip, port)),
+            ).await;
+
+            match connect_result {
+                Ok(Ok(stream)) => {
                     let mut buf = BufStream::new(stream);
                     match write_frame(&mut buf, &announce, &[]).await {
-                        Ok(_) => info!("[sender → {}] TransferAnnounce enviado. Receptor unido al enjambre [{}]", ip, tid),
-                        Err(e) => error!("[sender → {}] Error al enviar TransferAnnounce: {}", ip, e),
+                        Ok(_) => {
+                            info!("[sender → {}] ✓ TransferAnnounce entregado. Transfer: {}", ip, tid);
+                            true
+                        }
+                        Err(e) => {
+                            error!("[sender → {}] ✗ Error al escribir TransferAnnounce: {}", ip, e);
+                            false
+                        }
                     }
                 }
-                Err(e) => {
-                    error!("[sender → {}:{}] No se pudo conectar: {}", ip, port, e);
+                Ok(Err(e)) => {
+                    error!("[sender → {}:{}] ✗ Conexión rechazada: {} — ¿está la app corriendo? ¿Firewall?", ip, port, e);
+                    false
+                }
+                Err(_) => {
+                    error!("[sender → {}:{}] ✗ Timeout ({}s) al conectar — ¿IP incorrecta? ¿Firewall bloqueando?",
+                        ip, port, ANNOUNCE_CONNECT_TIMEOUT.as_secs());
+                    false
                 }
             }
         });
+        announce_handles.push((peer.ip.clone(), handle));
     }
 
-    // El sender ya tiene todos los chunks: marcar como completado y notificar la UI
+    // Esperar a que todos los announces terminen para tener el conteo real
+    let mut delivered = 0usize;
+    let mut failed = 0usize;
+    for (ip, handle) in announce_handles {
+        match handle.await {
+            Ok(true)  => delivered += 1,
+            Ok(false) => failed += 1,
+            Err(e)    => { error!("[sender] Tarea de announce panicked para {}: {}", ip, e); failed += 1; }
+        }
+    }
+
+    info!("[sender] Announces: {} entregados, {} fallidos.", delivered, failed);
+    if failed > 0 {
+        warn!("[sender] {} receptores no recibieron el anuncio. Causas posibles:", failed);
+        warn!("  1. La app no está corriendo en esas máquinas");
+        warn!("  2. Windows Firewall bloqueando el puerto en el receptor");
+        warn!("  3. IP del receptor cambió desde el último escaneo");
+    }
+
+    // El sender ya tiene todos los chunks: marcar como completado
     if let Some(mut t) = state.active_transfers.get_mut(&transfer_id) {
         t.status = TransferStatus::Completed;
     }
     let _ = app_handle.emit("transfer-complete", &transfer_id);
-    info!("[sender] Enjambre activado. {} anuncios enviados. Sirviendo chunks bajo demanda.", peer_count);
+    info!("[sender] Listo. Sirviendo chunks bajo demanda ({} receptores activos).", delivered);
 
     Ok(transfer_id)
 }

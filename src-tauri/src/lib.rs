@@ -18,13 +18,11 @@ use network::listener;
 use state::AppState;
 
 pub fn run() {
-    // Inicializar tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Inicializar tracing: escribe en consola Y en archivo de log.
+    // El archivo se guarda en %APPDATA%\com.NMFCC.app\logs\app.log (Windows)
+    // o ~/Library/Logs/com.NMFCC.app/app.log (macOS).
+    // Útil para diagnosticar problemas en máquinas receptoras sin acceso al terminal.
+    init_logging();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -175,21 +173,131 @@ pub fn run() {
         });
 }
 
-/// Detecta la IP local del sistema (primera interfaz no-loopback)
+/// Configura el sistema de logging para escribir en consola y en archivo.
+///
+/// Ruta del archivo:
+///   Windows : %APPDATA%\com.NMFCC.app\logs\app.log
+///   macOS   : ~/Library/Logs/com.NMFCC.app/app.log
+///   Fallback: app.log (directorio de trabajo)
+///
+/// El archivo se rota automáticamente cuando supera 5 MB para no llenar el disco.
+/// Para ver los logs en un receptor: abrir el Bloc de Notas y navegar a esa ruta.
+fn init_logging() {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    let log_path = get_log_path();
+
+    // Rotar si supera 5 MB
+    if let Some(ref p) = log_path {
+        if std::fs::metadata(p).map(|m| m.len()).unwrap_or(0) > 5 * 1024 * 1024 {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+
+    let file_writer = log_path.as_deref().and_then(|p| {
+        if let Some(parent) = std::path::Path::new(p).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(p)
+            .ok()
+            .map(std::sync::Mutex::new)
+    });
+
+    match file_writer {
+        Some(fw) => {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false) // Sin colores ANSI en el archivo
+                .with_writer(std::io::stdout.and(fw))
+                .init();
+            if let Some(ref p) = log_path {
+                eprintln!("[P2P Deployer] Logs guardados en: {}", p);
+            }
+        }
+        None => {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .init();
+        }
+    }
+}
+
+/// Devuelve la ruta del archivo de log según el sistema operativo.
+fn get_log_path() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("APPDATA").ok().map(|appdata| {
+            format!("{}\\com.NMFCC.app\\logs\\app.log", appdata)
+        })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var("HOME").ok().map(|home| {
+            format!("{}/Library/Logs/com.NMFCC.app/app.log", home)
+        })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Some("app.log".to_string())
+    }
+}
+
+/// Detecta la IP local del sistema priorizando la interfaz LAN real.
+///
+/// Orden de prioridad:
+///   1. Redes privadas de clase A/B/C típicas de LAN corporativa (10.x, 172.16-31.x, 192.168.x)
+///      → se prefiere la que tenga más octetos "normales" de LAN universitaria
+///   2. Cualquier otra interfaz no-loopback, no-APIPA, no-virtual (descarte de rangos de VM)
+///
+/// Problema que resuelve: en Windows, VMware/VirtualBox crean adaptadores virtuales
+/// (192.168.56.x, 172.x.x.x) que suelen aparecer ANTES de la Ethernet real en la lista.
+/// Si se usa la IP del adaptador virtual como "local_ip", los receptores intentan
+/// descargar chunks de una IP inalcanzable y la transferencia falla silenciosamente.
 fn get_local_ip() -> Option<String> {
     let addrs = if_addrs::get_if_addrs().ok()?;
-    for iface in addrs {
+
+    let mut candidates: Vec<std::net::Ipv4Addr> = Vec::new();
+
+    for iface in &addrs {
         if iface.is_loopback() {
             continue;
         }
         if let std::net::IpAddr::V4(ip) = iface.ip() {
-            let octets = ip.octets();
+            let o = ip.octets();
             // Ignorar APIPA (169.254.x.x)
-            if octets[0] == 169 && octets[1] == 254 {
+            if o[0] == 169 && o[1] == 254 {
                 continue;
             }
-            return Some(ip.to_string());
+            // Ignorar rango de VMware host-only / VirtualBox host-only más comunes:
+            //   192.168.56.x  → VirtualBox default host-only
+            //   192.168.99.x  → Docker Machine / VirtualBox legacy
+            //   172.17-19.x   → Docker bridge
+            if o[0] == 192 && o[1] == 168 && (o[2] == 56 || o[2] == 99) {
+                continue;
+            }
+            if o[0] == 172 && o[1] >= 17 && o[1] <= 19 {
+                continue;
+            }
+            candidates.push(ip);
         }
     }
-    None
+
+    // Preferir 192.168.x.x (más común en LAN universitaria) primero,
+    // luego 10.x.x.x, luego 172.16-31.x, luego cualquier otra.
+    let score = |ip: &std::net::Ipv4Addr| -> u8 {
+        let o = ip.octets();
+        if o[0] == 192 && o[1] == 168 { 0 }
+        else if o[0] == 10 { 1 }
+        else if o[0] == 172 && o[1] >= 16 && o[1] <= 31 { 2 }
+        else { 3 }
+    };
+    candidates.sort_by_key(score);
+
+    candidates.first().map(|ip| ip.to_string())
 }

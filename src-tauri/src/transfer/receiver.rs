@@ -6,7 +6,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::BufStream;
 use tokio::net::TcpStream;
@@ -188,24 +188,42 @@ async fn run_p2p_downloader(
 
         let h = tokio::spawn(async move {
             let _permit = permit;
-            
-            // 1. Buscar quién tiene la pieza
-            let peer = {
-                let tracker = state_c.tracker.lock().await;
-                tracker.entries.get(&ann_c.transfer_id)
-                    .and_then(|e| e.best_peer_for_chunk(chunk_index))
-            };
+            const MAX_RETRIES: u32 = 3;
+            const RETRY_DELAY: Duration = Duration::from_millis(800);
 
-            let Some(target_peer) = peer else {
-                warn!("[p2p-downloader] Chunk {} no disponible en ningún peer todavía — se omite en esta ronda", chunk_index);
-                return;
-            };
+            let mut last_err = String::new();
+            for attempt in 1..=MAX_RETRIES {
+                // 1. Buscar quién tiene la pieza
+                let peer = {
+                    let tracker = state_c.tracker.lock().await;
+                    tracker.entries.get(&ann_c.transfer_id)
+                        .and_then(|e| e.best_peer_for_chunk(chunk_index))
+                };
 
-            // 2. Descargar de ese peer
-            debug!("[p2p-downloader] Chunk {}/{} → descargando de {}:{}", chunk_index + 1, ann_c.total_chunks, target_peer.ip, target_peer.tcp_port);
-            if let Err(e) = download_chunk_from_peer(&target_peer, chunk_index, &ann_c, &state_c, &app_c).await {
-                error!("[p2p-downloader] Error descargando chunk {} de {}: {}", chunk_index, target_peer.ip, e);
+                let Some(target_peer) = peer else {
+                    warn!("[p2p-downloader] Chunk {} sin peer disponible (intento {}/{}) — reintentando en {}ms",
+                        chunk_index, attempt, MAX_RETRIES, RETRY_DELAY.as_millis());
+                    tokio::time::sleep(RETRY_DELAY).await;
+                    continue;
+                };
+
+                // 2. Descargar de ese peer
+                debug!("[p2p-downloader] Chunk {}/{} → {}:{} (intento {})",
+                    chunk_index + 1, ann_c.total_chunks, target_peer.ip, target_peer.tcp_port, attempt);
+
+                match download_chunk_from_peer(&target_peer, chunk_index, &ann_c, &state_c, &app_c).await {
+                    Ok(_) => return, // éxito
+                    Err(e) => {
+                        last_err = e.to_string();
+                        error!("[p2p-downloader] Chunk {} intento {}/{} falló ({}:{}): {}",
+                            chunk_index, attempt, MAX_RETRIES, target_peer.ip, target_peer.tcp_port, e);
+                        if attempt < MAX_RETRIES {
+                            tokio::time::sleep(RETRY_DELAY).await;
+                        }
+                    }
+                }
             }
+            error!("[p2p-downloader] Chunk {} FALLÓ después de {} intentos: {}", chunk_index, MAX_RETRIES, last_err);
         });
         handles.push(h);
     }
