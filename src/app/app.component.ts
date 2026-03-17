@@ -32,11 +32,14 @@ export class AppComponent implements OnInit {
   readonly selectedPeerIds = signal<string[]>([]);
   readonly tcpPort = signal<number | null>(null);
   readonly localPeerId = signal<string | null>(null);
+  readonly autostartEnabled = signal<boolean>(false);
+  readonly autostartLoading = signal<boolean>(false);
 
   async ngOnInit(): Promise<void> {
     await this.notificationService.init();
     await this.fetchTcpPort();
     await this.fetchLocalPeerId();
+    await this.fetchAutostart();
 
     // Escuchar transferencias completadas para notificar
     await this.bridge.onTransferComplete(async (transferId) => {
@@ -47,8 +50,10 @@ export class AppComponent implements OnInit {
       }
     });
 
-    // Escuchar transferencias entrantes para notificar
+    // Escuchar transferencias entrantes: mostrar tab y notificar
     await this.bridge.onTransferIncoming(async (transfer) => {
+      // Navegar al tab de transferencias para que el usuario vea el progreso
+      this.setTab('transfers');
       await this.notificationService.notifyTransferIncoming(transfer.file_name, transfer.sender_ip);
     });
   }
@@ -61,6 +66,24 @@ export class AppComponent implements OnInit {
   async fetchLocalPeerId(): Promise<void> {
     const id = await this.bridge.getLocalPeerId();
     this.localPeerId.set(id);
+  }
+
+  async fetchAutostart(): Promise<void> {
+    const enabled = await this.bridge.getAutostart().catch(() => false);
+    this.autostartEnabled.set(enabled);
+  }
+
+  async toggleAutostart(): Promise<void> {
+    this.autostartLoading.set(true);
+    const newValue = !this.autostartEnabled();
+    try {
+      await this.bridge.setAutostart(newValue);
+      this.autostartEnabled.set(newValue);
+    } catch (e) {
+      console.error('[settings] Error al cambiar autostart:', e);
+    } finally {
+      this.autostartLoading.set(false);
+    }
   }
 
   onPeersSelected(peerIds: string[]): void {

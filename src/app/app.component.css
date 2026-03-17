@@ -250,6 +250,31 @@
   line-height: 1.5;
 }
 
+/* ─── Toggle Button ─────────────────────────────────────────────────────────── */
+
+.btn-toggle {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1.5px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-toggle--on {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+
+.btn-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* ─── Global Overlay ────────────────────────────────────────────────────────── */
 
 .global-overlay {

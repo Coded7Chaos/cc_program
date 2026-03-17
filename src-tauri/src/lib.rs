@@ -32,6 +32,13 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        // Autostart: permite que la app arranque con el sistema operativo.
+        // En Windows usa el registro (HKCU\...\Run), en macOS usa LaunchAgent.
+        // No se habilita automáticamente; el usuario lo activa desde Configuración.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Si ya hay una instancia corriendo, mostrar la ventana
             if let Some(window) = app.get_webview_window("main") {
@@ -140,6 +147,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::config::get_local_peer_id,
             commands::config::get_app_tcp_port,
+            commands::config::get_autostart,
+            commands::config::set_autostart,
             commands::peers::get_peers,
             commands::peers::refresh_peers,
             commands::peers::check_peers_online,

@@ -65,7 +65,7 @@ pub fn build_chunk_map(
 
         if let Some(ref h) = app {
             if i % 10 == 0 || i == count - 1 {
-                let progress = (i as f64 / count as f64) * 100.0;
+                let progress = ((i + 1) as f64 / count as f64) * 100.0;
                 let _ = tauri::Emitter::emit(h, "hash-progress", progress);
             }
         }

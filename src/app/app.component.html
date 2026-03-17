@@ -115,6 +115,23 @@
               </div>
             </div>
 
+            <div class="settings-item">
+              <div class="settings-info">
+                <strong>Arranque automático con el sistema</strong>
+                <p>La app arrancará en segundo plano al iniciar Windows/macOS, lista para recibir archivos sin intervención del usuario.</p>
+              </div>
+              <div class="settings-value">
+                <button
+                  class="btn-toggle"
+                  [class.btn-toggle--on]="autostartEnabled()"
+                  [disabled]="autostartLoading()"
+                  (click)="toggleAutostart()"
+                >
+                  {{ autostartLoading() ? 'Guardando...' : autostartEnabled() ? 'Activado' : 'Desactivado' }}
+                </button>
+              </div>
+            </div>
+
             <div class="settings-tip">
               <span class="tip-icon">💡</span>
               <p>Puedes abrir múltiples instancias de esta aplicación en la misma PC para probar la red P2P. Cada una usará automáticamente un puerto distinto.</p>

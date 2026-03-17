@@ -74,6 +74,16 @@ export class TauriBridgeService {
     return invoke<number>('get_app_tcp_port');
   }
 
+  async getAutostart(): Promise<boolean> {
+    if (!this.isTauri()) return false;
+    return invoke<boolean>('get_autostart');
+  }
+
+  async setAutostart(enabled: boolean): Promise<void> {
+    if (!this.isTauri()) return;
+    return invoke<void>('set_autostart', { enabled });
+  }
+
   cancelTransfer(transferId: string): Promise<void> {
     return invoke<void>('cancel_transfer', { transferId });
   }

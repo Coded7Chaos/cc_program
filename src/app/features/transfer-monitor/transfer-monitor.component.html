@@ -1,6 +1,19 @@
 <div class="transfer-monitor">
   <h2>Transferencias activas</h2>
 
+  <!-- Banner visible para recepciones activas -->
+  @if (activeIncoming().length > 0) {
+    <div class="incoming-banner">
+      <div class="incoming-banner__pulse"></div>
+      <div class="incoming-banner__text">
+        <strong>Recibiendo {{ activeIncoming().length === 1 ? 'archivo' : activeIncoming().length + ' archivos' }}</strong>
+        @for (t of activeIncoming(); track t.transfer_id) {
+          <span class="incoming-banner__file">{{ t.file_name }} — {{ getProgress(t) }}%</span>
+        }
+      </div>
+    </div>
+  }
+
   @if (transferService.transfers().length === 0) {
     <div class="empty-state">
       No hay transferencias en progreso.
@@ -9,7 +22,18 @@
 
   <div class="transfer-list">
     @for (transfer of transferService.transfers(); track trackByTransfer($index, transfer)) {
-      <div class="transfer-card" [class]="getStatusClass(transfer.status)">
+      <div class="transfer-card"
+           [class]="getStatusClass(transfer.status)"
+           [class.status--receiving]="transfer.role === 'Receiver' && isActive(transfer.status)">
+
+        <!-- Encabezado especial para recepción activa -->
+        @if (transfer.role === 'Receiver' && isActive(transfer.status)) {
+          <div class="receiving-header">
+            <span class="receiving-dot"></span>
+            Recibiendo de {{ transfer.sender_ip }}
+          </div>
+        }
+
         <div class="transfer-card__header">
           <div class="transfer-card__title">
             <span class="file-name">{{ transfer.file_name }}</span>
@@ -26,7 +50,8 @@
         </div>
 
         <div class="progress-container">
-          <div class="progress-bar">
+          <div class="progress-bar"
+               [class.progress-bar--receiving]="transfer.role === 'Receiver' && isActive(transfer.status)">
             <div class="progress-bar__fill" [style.width.%]="getProgress(transfer)"></div>
           </div>
           <span class="progress-label">{{ getProgress(transfer) }}%</span>

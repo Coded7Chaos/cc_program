@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TransferService } from '../../core/services/transfer.service';
 import { ActiveTransfer, TransferStatus } from '../../core/models/transfer.model';
@@ -13,6 +13,13 @@ import { BytesFormatPipe } from '../../shared/pipes/bytes-format.pipe';
 })
 export class TransferMonitorComponent {
   readonly transferService = inject(TransferService);
+
+  /** Transferencias de tipo Receiver que están actualmente en progreso */
+  readonly activeIncoming = computed(() =>
+    this.transferService.transfers().filter(
+      t => t.role === 'Receiver' && (t.status === 'InProgress' || t.status === 'Pending')
+    )
+  );
 
   getProgress(transfer: ActiveTransfer): number {
     if (transfer.total_chunks === 0) return 100;

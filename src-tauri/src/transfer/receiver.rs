@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::BufStream;
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
@@ -122,6 +122,13 @@ async fn handle_transfer_announce(
     };
     state.active_transfers.insert(announce.transfer_id.clone(), active.clone());
     let _ = app_handle.emit("transfer-incoming", &active);
+
+    // Traer la ventana al frente para que el usuario vea el progreso.
+    // Si la app estaba minimizada al tray, esto la saca automáticamente.
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 
     // 5. Lanzar hilo de descarga P2P activa ANTES de responder al sender.
     // Así el downloader siempre arranca aunque el sender haya cerrado la conexión.
