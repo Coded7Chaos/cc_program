@@ -16,6 +16,7 @@
     "core:tray:allow-set-tooltip",
     "opener:default",
     "dialog:allow-open",
+    "dialog:allow-ask",
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",

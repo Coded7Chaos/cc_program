@@ -177,8 +177,8 @@ pub async fn run_subnet_scan(
 
     // 1. Consultar caché ARP actual
     let initial_entries = get_arp_table().await;
-    for (ip, mac) in initial_entries {
-        process_discovered_peer(&ip, &mac, &state, &app_handle).await;
+    for (ip, mac) in &initial_entries {
+        process_discovered_peer(ip, mac, &state, &app_handle).await;
     }
 
     // 2. Disparar peticiones ARP barriendo la subnet (pings)
@@ -212,9 +212,25 @@ pub async fn run_subnet_scan(
     // 3. Consultar caché ARP de nuevo tras los pings
     let final_entries = get_arp_table().await;
     let mut found_count = 0;
-    for (ip, mac) in final_entries {
-        if process_discovered_peer(&ip, &mac, &state, &app_handle).await {
+
+    // Combinar IPs vistas en ambas lecturas ARP para el conjunto de "visto en este scan"
+    let mut seen_ips = std::collections::HashSet::new();
+    for (ip, _) in &initial_entries { seen_ips.insert(ip.clone()); }
+    for (ip, _) in &final_entries   { seen_ips.insert(ip.clone()); }
+
+    for (ip, mac) in &final_entries {
+        if process_discovered_peer(ip, mac, &state, &app_handle).await {
             found_count += 1;
+        }
+    }
+
+    // Marcar offline a los peers que no aparecieron en ninguna de las dos lecturas ARP.
+    // Esto limpia entradas de máquinas que se apagaron o salieron de la red.
+    for mut entry in state.peers.iter_mut() {
+        if !seen_ips.contains(&entry.ip) && entry.online {
+            info!("[scanner] Peer {} ({}) no encontrado en ARP — marcando offline", entry.hostname, entry.ip);
+            entry.online = false;
+            let _ = app_handle.emit("peer-updated", entry.value());
         }
     }
 
@@ -224,7 +240,7 @@ pub async fn run_subnet_scan(
         "found": found_count
     }));
 
-    info!("Escaneo ARP completado. {} dispositivos encontrados.", found_count);
+    info!("[scanner] Escaneo ARP completado. {} dispositivos activos en la red.", found_count);
 }
 
 async fn process_discovered_peer(ip: &str, mac: &str, state: &Arc<AppState>, app_handle: &AppHandle) -> bool {
@@ -237,39 +253,55 @@ async fn process_discovered_peer(ip: &str, mac: &str, state: &Arc<AppState>, app
     let has_app = app_port.is_some();
     let kind = if has_app { PeerKind::App } else { PeerKind::NonApp };
     let tcp_port = app_port.unwrap_or(0);
-
-    let mut updated = false;
     let peer_id = if has_app { format!("{}:{}", ip, tcp_port) } else { ip.to_string() };
 
-    // Intentar actualizar por IP (DashMap no permite iteración mutable fácil así que usamos remove/insert si el ID cambia)
-    // Para simplificar, usaremos IP + Puerto como ID único para App peers.
-    
+    // Eliminar entradas obsoletas para esta IP que tengan un peer_id diferente.
+    // Caso típico: máquina tenía la app (clave "ip:puerto") y ya no la tiene (clave "ip"),
+    // o cambió de puerto. Sin esta limpieza quedan "fantasmas" en la lista.
+    let stale_keys: Vec<String> = state.peers.iter()
+        .filter(|e| e.ip == ip && e.peer_id != peer_id)
+        .map(|e| e.peer_id.clone())
+        .collect();
+    for stale_key in stale_keys {
+        info!("[scanner] Eliminando entrada obsoleta '{}' (misma IP '{}', peer_id cambió a '{}')", stale_key, ip, peer_id);
+        state.peers.remove(&stale_key);
+        let _ = app_handle.emit("peer-removed", &stale_key);
+    }
+
+    // Actualizar entrada existente o crear una nueva
+    let mut found_existing = false;
     state.peers.alter(&peer_id, |_, mut entry| {
         entry.mac_address = Some(mac.to_string());
         entry.last_seen = current_epoch();
         entry.online = true;
         entry.kind = kind.clone();
         entry.tcp_port = tcp_port;
-        updated = true;
+        found_existing = true;
         entry
     });
 
-    if !updated {
-        let peer_entry = PeerEntry {
-            peer_id: peer_id.clone(),
-            hostname: format!("Device-{}", &mac.replace(":", "").get(0..6).unwrap_or("unknown")),
-            ip: ip.to_string(),
-            mac_address: Some(mac.to_string()),
-            tcp_port,
-            kind,
-            last_seen: current_epoch(),
-            online: true,
-            app_version: None,
-        };
-        state.peers.insert(peer_id, peer_entry.clone());
-        let _ = app_handle.emit("peer-updated", &peer_entry);
-        return true;
+    // Siempre emitir peer-updated para que la UI refleje el estado actual
+    if found_existing {
+        if let Some(entry) = state.peers.get(&peer_id) {
+            let _ = app_handle.emit("peer-updated", entry.value());
+        }
+        return false;
     }
-    
-    false
+
+    // Entrada nueva
+    let peer_entry = PeerEntry {
+        peer_id: peer_id.clone(),
+        hostname: format!("Device-{}", mac.replace([':', '-'], "").get(0..6).unwrap_or("unknown")),
+        ip: ip.to_string(),
+        mac_address: Some(mac.to_string()),
+        tcp_port,
+        kind,
+        last_seen: current_epoch(),
+        online: true,
+        app_version: None,
+    };
+    info!("[scanner] Nuevo peer descubierto: {} ({}) — App: {}", peer_entry.hostname, ip, has_app);
+    state.peers.insert(peer_id, peer_entry.clone());
+    let _ = app_handle.emit("peer-updated", &peer_entry);
+    true
 }

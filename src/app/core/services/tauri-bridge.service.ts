@@ -28,6 +28,11 @@ export class TauriBridgeService {
     return invoke<string[]>('check_peers_online', { peerIds });
   }
 
+  async clearPeers(): Promise<void> {
+    if (!this.isTauri()) return;
+    return invoke<void>('clear_peers');
+  }
+
   async getLocalPeerId(): Promise<string> {
     if (!this.isTauri()) return 'browser-mode';
     return invoke<string>('get_local_peer_id');

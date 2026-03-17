@@ -3,6 +3,9 @@
     <h2>Peers en la red</h2>
     <div class="peer-list__actions">
       <span class="peer-count">{{ peerService.onlinePeers().length }} online</span>
+      <button (click)="clearPeers()" [disabled]="peerService.scanning()" class="btn-clear" title="Borra todos los peers de la lista en memoria. Útil para limpiar datos obsoletos.">
+        Limpiar lista
+      </button>
       <button (click)="refresh()" [disabled]="peerService.scanning()" class="btn-refresh">
         {{ peerService.scanning() ? 'Escaneando...' : 'Actualizar' }}
       </button>

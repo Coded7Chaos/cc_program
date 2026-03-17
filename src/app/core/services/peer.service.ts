@@ -62,6 +62,13 @@ export class PeerService implements OnDestroy {
     setTimeout(() => this._scanning.set(false), 10000);
   }
 
+  async clearAll(): Promise<void> {
+    await this.bridge.clearPeers().catch(console.error);
+    // Los eventos peer-removed del backend limpiarán la lista,
+    // pero también limpiamos localmente por si acaso
+    this._peers.set([]);
+  }
+
   ngOnDestroy(): void {
     this.unlistenFns.forEach(fn => fn());
   }

@@ -53,6 +53,12 @@ export class PeerListComponent {
     await this.peerService.refresh();
   }
 
+  async clearPeers(): Promise<void> {
+    this.selectedPeerIds.set(new Set());
+    this.peersSelected.emit([]);
+    await this.peerService.clearAll();
+  }
+
   trackByPeer(_: number, peer: PeerEntry): string {
     return peer.peer_id;
   }

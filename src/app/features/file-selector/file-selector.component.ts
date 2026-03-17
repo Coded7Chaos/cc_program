@@ -127,17 +127,23 @@ export class FileSelectorComponent {
     console.log('Mostrando diálogo para:', availablePeers.map(p => p.hostname).join(', '));
 
     let confirmed = false;
-    if ((window as any).__TAURI_INTERNALS__) {
-      confirmed = await ask(
-        `¿Está seguro de enviar el archivo "${file.name}" a estas computadoras?\n\n${peerListStr}`,
-        {
-          title: 'Confirmar envío masivo',
-          kind: 'info',
-          okLabel: 'Sí, enviar',
-          cancelLabel: 'Cancelar'
-        }
-      );
-    } else {
+    try {
+      if ((window as any).__TAURI_INTERNALS__) {
+        confirmed = await ask(
+          `¿Está seguro de enviar el archivo "${file.name}" a estas computadoras?\n\n${peerListStr}`,
+          {
+            title: 'Confirmar envío masivo',
+            kind: 'info',
+            okLabel: 'Sí, enviar',
+            cancelLabel: 'Cancelar'
+          }
+        );
+      } else {
+        confirmed = confirm(`¿Enviar "${file.name}" a:\n${peerListStr}?`);
+      }
+    } catch (e) {
+      console.error('[P2P] Error al mostrar diálogo de confirmación (¿falta permiso dialog:allow-ask?):', e);
+      // Fallback al confirm nativo del navegador si ask() falla
       confirmed = confirm(`¿Enviar "${file.name}" a:\n${peerListStr}?`);
     }
     console.log('Respuesta del usuario:', confirmed ? 'CONFIRMADO' : 'CANCELADO');

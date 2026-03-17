@@ -1,9 +1,25 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use crate::state::{AppState, PeerEntry};
 use crate::network::scanner;
-use tauri::AppHandle;
+
+/// Elimina todos los peers del mapa en memoria y notifica a la UI.
+/// Útil para limpiar datos obsoletos sin necesidad de reiniciar la app.
+#[tauri::command]
+pub async fn clear_peers(
+    state: State<'_, Arc<AppState>>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let keys: Vec<String> = state.peers.iter().map(|e| e.peer_id.clone()).collect();
+    let count = keys.len();
+    for key in keys {
+        state.peers.remove(&key);
+        let _ = app_handle.emit("peer-removed", &key);
+    }
+    tracing::info!("[clear_peers] {} entradas eliminadas de la caché de peers.", count);
+    Ok(())
+}
 
 /// Retorna todos los peers conocidos
 #[tauri::command]
