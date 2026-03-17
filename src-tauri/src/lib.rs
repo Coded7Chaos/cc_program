@@ -138,6 +138,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::config::get_local_peer_id,
             commands::config::get_app_tcp_port,
             commands::peers::get_peers,
             commands::peers::refresh_peers,

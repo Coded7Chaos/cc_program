@@ -31,10 +31,12 @@ export class AppComponent implements OnInit {
   readonly activeTab = signal<'peers' | 'transfers' | 'settings'>('peers');
   readonly selectedPeerIds = signal<string[]>([]);
   readonly tcpPort = signal<number | null>(null);
+  readonly localPeerId = signal<string | null>(null);
 
   async ngOnInit(): Promise<void> {
     await this.notificationService.init();
     await this.fetchTcpPort();
+    await this.fetchLocalPeerId();
 
     // Escuchar transferencias completadas para notificar
     await this.bridge.onTransferComplete(async (transferId) => {
@@ -56,6 +58,11 @@ export class AppComponent implements OnInit {
     this.tcpPort.set(port);
   }
 
+  async fetchLocalPeerId(): Promise<void> {
+    const id = await this.bridge.getLocalPeerId();
+    this.localPeerId.set(id);
+  }
+
   onPeersSelected(peerIds: string[]): void {
     this.selectedPeerIds.set(peerIds);
   }
@@ -64,7 +71,7 @@ export class AppComponent implements OnInit {
     this.activeTab.set('transfers');
   }
 
-  setTab(tab: 'peers' | 'transfers'): void {
+  setTab(tab: 'peers' | 'transfers' | 'settings'): void {
     this.activeTab.set(tab);
   }
 

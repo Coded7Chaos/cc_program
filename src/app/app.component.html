@@ -92,7 +92,7 @@
                 <p>Tu identificador único en el enjambre P2P.</p>
               </div>
               <div class="settings-value">
-                <code>{{ peerService.state().peer_id }}</code>
+                <code>{{ localPeerId() ?? 'Cargando...' }}</code>
               </div>
             </div>
 

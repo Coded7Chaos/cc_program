@@ -17,6 +17,10 @@ export class TauriBridgeService {
     return invoke<void>('refresh_peers');
   }
 
+  getLocalPeerId(): Promise<string> {
+    return invoke<string>('get_local_peer_id');
+  }
+
   // ─── File Commands ──────────────────────────────────────────────────────────
 
   openFileDialog(): Promise<string | null> {
