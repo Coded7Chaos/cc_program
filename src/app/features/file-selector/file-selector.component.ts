@@ -1,10 +1,12 @@
-import { Component, inject, output, signal } from '@angular/core';
+import { Component, inject, input, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TauriBridgeService } from '../../core/services/tauri-bridge.service';
 import { TransferService } from '../../core/services/transfer.service';
+import { PeerService } from '../../core/services/peer.service';
 import { BytesFormatPipe } from '../../shared/pipes/bytes-format.pipe';
 import { FileInfo } from '../../core/models/transfer.model';
+import { ask } from '@tauri-apps/plugin-dialog';
 
 @Component({
   selector: 'app-file-selector',
@@ -16,6 +18,7 @@ import { FileInfo } from '../../core/models/transfer.model';
 export class FileSelectorComponent {
   private bridge = inject(TauriBridgeService);
   private transferService = inject(TransferService);
+  private peerService = inject(PeerService);
 
   readonly fileInfo = signal<FileInfo | null>(null);
   readonly destinationPath = signal('C:\\Descargas');
@@ -23,13 +26,9 @@ export class FileSelectorComponent {
   readonly sending = signal(false);
   readonly error = signal<string | null>(null);
 
-  targetPeerIds: string[] = [];
+  targetPeerIds = input<string[]>([]);
 
   transferStarted = output<string>();
-
-  onPeersSelected(peerIds: string[]): void {
-    this.targetPeerIds = peerIds;
-  }
 
   async selectFile(): Promise<void> {
     this.loading.set(true);
@@ -49,15 +48,42 @@ export class FileSelectorComponent {
 
   async send(): Promise<void> {
     const file = this.fileInfo();
-    if (!file || this.targetPeerIds.length === 0) return;
+    const selectedIds = this.targetPeerIds();
+    if (!file || selectedIds.length === 0) return;
+
+    // 1. Verificar cuáles de los seleccionados siguen disponibles y tienen la App
+    const availablePeers = this.peerService.peers().filter(p => 
+      selectedIds.includes(p.peer_id) && p.online && p.kind === 'App'
+    );
+
+    if (availablePeers.length === 0) {
+      this.error.set('Ninguno de los peers seleccionados está disponible actualmente.');
+      return;
+    }
+
+    // 2. Preparar mensaje de confirmación con la lista
+    const peerListStr = availablePeers.map(p => `• ${p.hostname} (${p.ip})`).join('\n');
+    const confirmed = await ask(
+      `¿Está seguro de enviar el archivo "${file.name}" a estas computadoras?\n\n${peerListStr}`,
+      { 
+        title: 'Confirmar envío masivo',
+        kind: 'info',
+        okLabel: 'Sí, enviar',
+        cancelLabel: 'Cancelar'
+      }
+    );
+
+    if (!confirmed) return;
 
     this.sending.set(true);
     this.error.set(null);
     try {
+      // Solo enviar a los que verificamos que están disponibles
+      const finalPeerIds = availablePeers.map(p => p.peer_id);
       const transferId = await this.bridge.sendFile(
         file.path,
         this.destinationPath(),
-        this.targetPeerIds
+        finalPeerIds
       );
       this.transferStarted.emit(transferId);
       this.fileInfo.set(null);
@@ -69,6 +95,6 @@ export class FileSelectorComponent {
   }
 
   get canSend(): boolean {
-    return !!this.fileInfo() && this.targetPeerIds.length > 0 && !this.sending();
+    return !!this.fileInfo() && this.targetPeerIds().length > 0 && !this.sending();
   }
 }

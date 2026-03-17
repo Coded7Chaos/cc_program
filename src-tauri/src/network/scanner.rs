@@ -9,6 +9,12 @@ use tokio::sync::broadcast;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use crate::state::{AppState, PeerEntry, PeerKind};
 
 const PING_TIMEOUT_MS: u64 = 500;
@@ -51,7 +57,11 @@ fn get_local_subnet() -> Option<(Ipv4Addr, u32)> {
 /// Obtiene la tabla ARP del sistema
 async fn get_arp_table() -> Vec<(String, String)> {
     let output = if cfg!(target_os = "windows") {
-        Command::new("arp").arg("-a").output().await
+        let mut cmd = Command::new("arp");
+        cmd.arg("-a");
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output().await
     } else {
         Command::new("arp").arg("-an").output().await
     };
@@ -99,10 +109,11 @@ async fn get_arp_table() -> Vec<(String, String)> {
 /// Dispara una petición ARP haciendo un ping rápido
 async fn trigger_arp(ip: Ipv4Addr) {
     let _ = if cfg!(target_os = "windows") {
-        Command::new("ping")
-            .args(["-n", "1", "-w", &PING_TIMEOUT_MS.to_string(), &ip.to_string()])
-            .output()
-            .await
+        let mut cmd = Command::new("ping");
+        cmd.args(["-n", "1", "-w", &PING_TIMEOUT_MS.to_string(), &ip.to_string()]);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output().await
     } else {
         Command::new("ping")
             .args(["-c", "1", "-t", "1", &ip.to_string()])
@@ -114,18 +125,41 @@ async fn trigger_arp(ip: Ipv4Addr) {
 /// Verifica si un peer tiene la app respondiendo en el rango de puertos TCP.
 /// Retorna el puerto que respondió, si existe.
 async fn find_app_port(ip: &str) -> Option<u16> {
-    for port in START_PORT..=(START_PORT + PORT_RANGE) {
-        let Ok(addr) = format!("{}:{}", ip, port).parse::<SocketAddr>() else { continue; };
-        let success = tokio::time::timeout(
-            Duration::from_millis(PROBE_TIMEOUT_MS),
-            TcpStream::connect(addr),
-        )
-        .await
-        .is_ok_and(|r| r.is_ok());
-
-        if success { return Some(port); }
+    // Primero probar el puerto por defecto (el más probable) de forma individual para ahorrar recursos
+    if probe_single_port(ip, START_PORT).await {
+        return Some(START_PORT);
     }
+
+    // Si no es el default, probar el resto en paralelo
+    let mut tasks = Vec::new();
+    for port in (START_PORT + 1)..=(START_PORT + PORT_RANGE) {
+        let ip_str = ip.to_string();
+        tasks.push(tokio::spawn(async move {
+            if probe_single_port(&ip_str, port).await {
+                Some(port)
+            } else {
+                None
+            }
+        }));
+    }
+
+    for task in tasks {
+        if let Ok(Some(port)) = task.await {
+            return Some(port);
+        }
+    }
+
     None
+}
+
+async fn probe_single_port(ip: &str, port: u16) -> bool {
+    let Ok(addr) = format!("{}:{}", ip, port).parse::<SocketAddr>() else { return false; };
+    tokio::time::timeout(
+        Duration::from_millis(PROBE_TIMEOUT_MS),
+        TcpStream::connect(addr),
+    )
+    .await
+    .is_ok_and(|r| r.is_ok())
 }
 
 /// Realiza escaneo de la subnet usando ARP

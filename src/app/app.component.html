@@ -59,6 +59,7 @@
         <!-- Selector de archivo -->
         <div class="divider"></div>
         <app-file-selector
+          [targetPeerIds]="selectedPeerIds()"
           (transferStarted)="onTransferStarted($event)"
         />
       </div>

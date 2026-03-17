@@ -34,8 +34,11 @@ export class PeerListComponent {
   toggleAll(event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
     if (checked) {
-      const allIds = this.peerService.peers().map(p => p.peer_id);
-      this.selectedPeerIds.set(new Set(allIds));
+      // Solo seleccionar aquellos que son tipo 'App'
+      const appPeerIds = this.peerService.peers()
+        .filter(p => p.kind === 'App')
+        .map(p => p.peer_id);
+      this.selectedPeerIds.set(new Set(appPeerIds));
     } else {
       this.selectedPeerIds.set(new Set());
     }

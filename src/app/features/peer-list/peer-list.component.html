@@ -44,6 +44,7 @@
               type="checkbox"
               [checked]="isSelected(peer.peer_id)"
               [disabled]="peer.kind === 'NonApp'"
+              [title]="peer.kind === 'NonApp' ? 'Requiere la aplicación instalada' : ''"
               (change)="togglePeer(peer.peer_id, $event)"
             />
           </td>

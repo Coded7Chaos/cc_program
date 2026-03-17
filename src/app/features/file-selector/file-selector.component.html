@@ -33,7 +33,7 @@
 
   <div class="send-actions">
     <span class="peers-selected">
-      {{ targetPeerIds.length > 0 ? targetPeerIds.length + ' peer(s) seleccionados' : 'Selecciona peers en la lista' }}
+      {{ targetPeerIds().length > 0 ? targetPeerIds().length + ' peer(s) seleccionados' : 'Selecciona peers en la lista' }}
     </span>
     <button
       (click)="send()"
