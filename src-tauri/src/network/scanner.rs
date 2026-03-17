@@ -10,11 +10,14 @@ use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info};
 
 use crate::state::{AppState, PeerEntry, PeerKind};
-use crate::network::discovery::TCP_PORT;
 
 const PING_TIMEOUT_MS: u64 = 500;
-const PROBE_TIMEOUT_MS: u64 = 300;
+const PROBE_TIMEOUT_MS: u64 = 200; // Sondeo rápido para red local
 const MAX_CONCURRENT_PINGS: usize = 64;
+
+// Escanear un rango de puertos para permitir múltiples instancias en la misma PC
+const START_PORT: u16 = 47833;
+const PORT_RANGE: u16 = 10; 
 
 fn current_epoch() -> u64 {
     SystemTime::now()
@@ -108,15 +111,21 @@ async fn trigger_arp(ip: Ipv4Addr) {
     };
 }
 
-/// Verifica si un peer tiene la app respondiendo en el puerto TCP
-async fn probe_app(ip: &str) -> bool {
-    let Ok(addr) = format!("{}:{}", ip, TCP_PORT).parse::<SocketAddr>() else { return false; };
-    tokio::time::timeout(
-        Duration::from_millis(PROBE_TIMEOUT_MS),
-        TcpStream::connect(addr),
-    )
-    .await
-    .is_ok_and(|r| r.is_ok())
+/// Verifica si un peer tiene la app respondiendo en el rango de puertos TCP.
+/// Retorna el puerto que respondió, si existe.
+async fn find_app_port(ip: &str) -> Option<u16> {
+    for port in START_PORT..=(START_PORT + PORT_RANGE) {
+        let Ok(addr) = format!("{}:{}", ip, port).parse::<SocketAddr>() else { continue; };
+        let success = tokio::time::timeout(
+            Duration::from_millis(PROBE_TIMEOUT_MS),
+            TcpStream::connect(addr),
+        )
+        .await
+        .is_ok_and(|r| r.is_ok());
+
+        if success { return Some(port); }
+    }
+    None
 }
 
 /// Realiza escaneo de la subnet usando ARP
@@ -130,7 +139,7 @@ pub async fn run_subnet_scan(
         return;
     };
 
-    info!("Iniciando escaneo ARP de la subnet...");
+    info!("Iniciando escaneo ARP de la subnet con sondeo multi-puerto...");
 
     // 1. Consultar caché ARP actual
     let initial_entries = get_arp_table().await;
@@ -189,13 +198,19 @@ async fn process_discovered_peer(ip: &str, mac: &str, state: &Arc<AppState>, app
         return false;
     }
 
-    // Probar si tiene la app
-    let has_app = probe_app(ip).await;
+    // Probar si tiene la app en algún puerto del rango
+    let app_port = find_app_port(ip).await;
+    let has_app = app_port.is_some();
     let kind = if has_app { PeerKind::App } else { PeerKind::NonApp };
-    let tcp_port = if has_app { TCP_PORT } else { 0 };
+    let tcp_port = app_port.unwrap_or(0);
 
     let mut updated = false;
-    state.peers.alter(ip, |_, mut entry| {
+    let peer_id = if has_app { format!("{}:{}", ip, tcp_port) } else { ip.to_string() };
+
+    // Intentar actualizar por IP (DashMap no permite iteración mutable fácil así que usamos remove/insert si el ID cambia)
+    // Para simplificar, usaremos IP + Puerto como ID único para App peers.
+    
+    state.peers.alter(&peer_id, |_, mut entry| {
         entry.mac_address = Some(mac.to_string());
         entry.last_seen = current_epoch();
         entry.online = true;
@@ -207,7 +222,7 @@ async fn process_discovered_peer(ip: &str, mac: &str, state: &Arc<AppState>, app
 
     if !updated {
         let peer_entry = PeerEntry {
-            peer_id: ip.to_string(),
+            peer_id: peer_id.clone(),
             hostname: format!("Device-{}", &mac.replace(":", "").get(0..6).unwrap_or("unknown")),
             ip: ip.to_string(),
             mac_address: Some(mac.to_string()),
@@ -217,7 +232,7 @@ async fn process_discovered_peer(ip: &str, mac: &str, state: &Arc<AppState>, app
             online: true,
             app_version: None,
         };
-        state.peers.insert(ip.to_string(), peer_entry.clone());
+        state.peers.insert(peer_id, peer_entry.clone());
         let _ = app_handle.emit("peer-updated", &peer_entry);
         return true;
     }

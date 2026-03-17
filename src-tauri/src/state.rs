@@ -89,6 +89,7 @@ pub struct AppConfig {
     pub auto_accept_transfers: bool,
     pub minimize_to_tray: bool,
     pub autostart: bool,
+    pub tcp_port: u16,
 }
 
 impl Default for AppConfig {
@@ -99,6 +100,7 @@ impl Default for AppConfig {
             auto_accept_transfers: true,
             minimize_to_tray: true,
             autostart: false,
+            tcp_port: 47833,
         }
     }
 }
@@ -108,6 +110,7 @@ pub struct AppState {
     pub peer_id: String,
     pub hostname: String,
     pub local_ip: String,
+    pub tcp_port: RwLock<u16>, // Puerto real en uso (puede variar si el default está ocupado)
     pub peers: Arc<DashMap<String, PeerEntry>>,
     pub active_transfers: Arc<DashMap<String, ActiveTransfer>>,
     pub tracker: Arc<Mutex<TransferTracker>>,
@@ -124,14 +127,17 @@ impl AppState {
         local_ip: String,
         shutdown_tx: broadcast::Sender<()>,
     ) -> Self {
+        let config = AppConfig::default();
+        let port = config.tcp_port;
         Self {
             peer_id,
             hostname,
             local_ip,
+            tcp_port: RwLock::new(port),
             peers: Arc::new(DashMap::new()),
             active_transfers: Arc::new(DashMap::new()),
             tracker: Arc::new(Mutex::new(TransferTracker::default())),
-            config: Arc::new(RwLock::new(AppConfig::default())),
+            config: Arc::new(RwLock::new(config)),
             shutdown_tx,
             cancel_senders: Arc::new(DashMap::new()),
         }

@@ -28,11 +28,13 @@ export class AppComponent implements OnInit {
   readonly peerService = inject(PeerService);
   readonly transferService = inject(TransferService);
 
-  readonly activeTab = signal<'peers' | 'transfers'>('peers');
+  readonly activeTab = signal<'peers' | 'transfers' | 'settings'>('peers');
   readonly selectedPeerIds = signal<string[]>([]);
+  readonly tcpPort = signal<number | null>(null);
 
   async ngOnInit(): Promise<void> {
     await this.notificationService.init();
+    await this.fetchTcpPort();
 
     // Escuchar transferencias completadas para notificar
     await this.bridge.onTransferComplete(async (transferId) => {
@@ -47,6 +49,11 @@ export class AppComponent implements OnInit {
     await this.bridge.onTransferIncoming(async (transfer) => {
       await this.notificationService.notifyTransferIncoming(transfer.file_name, transfer.sender_ip);
     });
+  }
+
+  async fetchTcpPort(): Promise<void> {
+    const port = await this.bridge.getTcpPort();
+    this.tcpPort.set(port);
   }
 
   onPeersSelected(peerIds: string[]): void {

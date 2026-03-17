@@ -41,6 +41,10 @@ export class TauriBridgeService {
     return invoke<ActiveTransfer[]>('get_active_transfers');
   }
 
+  getTcpPort(): Promise<number> {
+    return invoke<number>('get_app_tcp_port');
+  }
+
   cancelTransfer(transferId: string): Promise<void> {
     return invoke<void>('cancel_transfer', { transferId });
   }

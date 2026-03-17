@@ -30,6 +30,15 @@
           {{ transferCount }}
         </span>
       </button>
+
+      <button
+        class="nav-item"
+        [class.active]="activeTab() === 'settings'"
+        (click)="setTab('settings')"
+      >
+        <span class="nav-icon">⚙️</span>
+        <span>Configuración</span>
+      </button>
     </nav>
 
     <div class="sidebar__status">
@@ -58,6 +67,41 @@
     @if (activeTab() === 'transfers') {
       <div class="content-panel">
         <app-transfer-monitor />
+      </div>
+    }
+
+    @if (activeTab() === 'settings') {
+      <div class="content-panel">
+        <div class="settings-view">
+          <h2>Configuración del Sistema</h2>
+          
+          <div class="settings-card">
+            <div class="settings-item">
+              <div class="settings-info">
+                <strong>Puerto TCP de Escucha</strong>
+                <p>Este es el puerto que esta instancia está usando para recibir archivos y ser descubierta en la red.</p>
+              </div>
+              <div class="settings-value">
+                <span class="badge badge--port">{{ tcpPort() ?? 'Cargando...' }}</span>
+              </div>
+            </div>
+
+            <div class="settings-item">
+              <div class="settings-info">
+                <strong>Identificador de Nodo (Peer ID)</strong>
+                <p>Tu identificador único en el enjambre P2P.</p>
+              </div>
+              <div class="settings-value">
+                <code>{{ peerService.state().peer_id }}</code>
+              </div>
+            </div>
+
+            <div class="settings-tip">
+              <span class="tip-icon">💡</span>
+              <p>Puedes abrir múltiples instancias de esta aplicación en la misma PC para probar la red P2P. Cada una usará automáticamente un puerto distinto.</p>
+            </div>
+          </div>
+        </div>
       </div>
     }
   </main>

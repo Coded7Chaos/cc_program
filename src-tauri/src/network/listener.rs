@@ -1,30 +1,46 @@
 //! Receptor TCP (transferencia).
-//! - TCP: escucha conexiones entrantes de transferencia en puerto 47833
+//! - TCP: escucha conexiones entrantes de transferencia.
 
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tauri::AppHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
-use crate::network::discovery::TCP_PORT;
 use crate::transfer::receiver;
+use crate::state::AppState;
 
-/// Tarea que escucha conexiones TCP entrantes de transferencia
+/// Tarea que escucha conexiones TCP entrantes de transferencia.
+/// Intenta el puerto configurado y si falla, busca el siguiente disponible.
 pub async fn run_tcp_listener(
     state: Arc<AppState>,
     app_handle: AppHandle,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) {
-    let listener = match TcpListener::bind(format!("0.0.0.0:{}", TCP_PORT)).await {
-        Ok(l) => l,
-        Err(e) => {
-            error!("No se pudo iniciar TCP listener en puerto {}: {}", TCP_PORT, e);
-            return;
+    let mut port = *state.tcp_port.read().await;
+    let max_retries = 100;
+
+    let listener = loop {
+        match TcpListener::bind(format!("0.0.0.0:{}", port)).await {
+            Ok(l) => {
+                // Actualizar el puerto real en el estado
+                let mut p_lock = state.tcp_port.write().await;
+                *p_lock = port;
+                drop(p_lock);
+                break l;
+            }
+            Err(e) => {
+                warn!("Puerto {} ocupado, probando siguiente ({})...", port, e);
+                port += 1;
+                if port > 47833 + max_retries {
+                    error!("No se pudo encontrar ningún puerto TCP disponible.");
+                    return;
+                }
+            }
         }
     };
 
-    info!("Listener TCP iniciado en puerto {}", TCP_PORT);
+    info!("Listener TCP iniciado en puerto {}", port);
 
     loop {
         tokio::select! {
@@ -56,5 +72,3 @@ pub async fn run_tcp_listener(
         }
     }
 }
-
-use crate::state::AppState;
