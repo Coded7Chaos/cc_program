@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tokio::net::TcpStream;
 use tokio::io::BufStream;
 use tracing::{info, error, warn};
@@ -31,13 +31,16 @@ pub async fn start_send(
     dest_path: String,
     target_peer_ids: Vec<String>,
     state: Arc<AppState>,
-    _app_handle: AppHandle,
+    app_handle: AppHandle,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    info!("--- INICIANDO PROCESO DE ENVÍO P2P ---");
-    
+    info!("╔══════════════════════════════════════╗");
+    info!("║   INICIANDO PROCESO DE ENVÍO P2P     ║");
+    info!("╚══════════════════════════════════════╝");
+    info!("[sender] Peers destino: {:?}", target_peer_ids);
+
     let path = Path::new(&file_path);
     if !path.exists() {
-        error!("Error crítico: El archivo no existe en {}", file_path);
+        error!("[sender] Error crítico: El archivo no existe en '{}'", file_path);
         return Err("Archivo no encontrado".into());
     }
 
@@ -49,41 +52,46 @@ pub async fn start_send(
     let file_size = std::fs::metadata(path)?.len();
     let total_chunks = chunk_count(file_size, CHUNK_SIZE);
 
-    info!("Archivo: '{}' ({} bytes, {} chunks)", file_name, file_size, total_chunks);
+    info!("[sender] Archivo: '{}' | Tamaño: {} bytes | Chunks: {} x {} MB",
+        file_name, file_size, total_chunks, CHUNK_SIZE / (1024 * 1024));
 
     // 1. Calcular hashes
     let path_clone = path.to_path_buf();
-    let app_clone = _app_handle.clone();
-    info!("Calculando hashes SHA1 para el enjambre...");
+    let app_clone = app_handle.clone();
+    info!("[sender] Calculando hashes SHA1 de {} chunks (emitiendo hash-progress)...", total_chunks);
+    let t_hash = std::time::Instant::now();
     let chunk_hashes = tokio::task::spawn_blocking(move || {
         build_chunk_map(&path_clone, CHUNK_SIZE, Some(app_clone))
     }).await??;
-    info!("Hashes calculados correctamente.");
+    info!("[sender] Hashes calculados en {}ms.", t_hash.elapsed().as_millis());
 
     let transfer_id = Uuid::new_v4().to_string();
-    info!("ID de transferencia asignado: {}", transfer_id);
+    info!("[sender] Transfer ID: {}", transfer_id);
 
     // 2. Construir la lista del Enjambre (Swarm)
     let mut swarm = Vec::new();
+    let my_port = *state.tcp_port.read().await;
     // Añadirse a sí mismo como el primer peer (la semilla)
     swarm.push(SwarmPeer {
         peer_id: state.peer_id.clone(),
         ip: state.local_ip.clone(),
-        tcp_port: *state.tcp_port.read().await,
+        tcp_port: my_port,
     });
+    info!("[sender] Semilla (yo): {}:{}", state.local_ip, my_port);
 
     for peer_id in &target_peer_ids {
         if let Some(peer) = state.peers.get(peer_id) {
+            info!("[sender] Añadiendo al enjambre: {} ({}:{})", peer.hostname, peer.ip, peer.tcp_port);
             swarm.push(SwarmPeer {
                 peer_id: peer_id.clone(),
                 ip: peer.ip.clone(),
                 tcp_port: peer.tcp_port,
             });
         } else {
-            warn!("Advertencia: Peer ID {} no encontrado en el mapa", peer_id);
+            warn!("[sender] Peer ID '{}' no encontrado en el mapa de peers — se omite", peer_id);
         }
     }
-    info!("Enjambre configurado con {} participantes.", swarm.len());
+    info!("[sender] Enjambre total: {} participantes.", swarm.len());
 
     // 3. Registrar en el Tracker local que nosotros tenemos todo
     {
@@ -112,17 +120,24 @@ pub async fn start_send(
         swarm: swarm.clone(),
         sender_ip: state.local_ip.clone(),
         sender_peer_id: state.peer_id.clone(),
-        bytes_transferred: 0,
+        bytes_transferred: file_size, // El sender ya transfirió todo (es la semilla)
         started_at: current_epoch(),
     };
+    // Notificar a la UI que el sender inició una transferencia (aparece en el monitor)
+    info!("[sender] Emitiendo transfer-incoming para la UI del sender...");
+    let _ = app_handle.emit("transfer-incoming", &active);
     state.active_transfers.insert(transfer_id.clone(), active);
 
     // 5. Notificar a todos los peers para que se unan al enjambre
-    info!("Notificando a los receptores para iniciar el flujo P2P...");
+    info!("[sender] Enviando TransferAnnounce a {} receptores...", target_peer_ids.len());
+    let peer_count = target_peer_ids.len();
     for peer_id in target_peer_ids {
         let peer = match state.peers.get(&peer_id) {
             Some(p) => p.clone(),
-            None => continue,
+            None => {
+                warn!("[sender] Peer '{}' desapareció del mapa justo antes del anuncio", peer_id);
+                continue;
+            }
         };
 
         let announce = TransferAnnounce {
@@ -141,24 +156,30 @@ pub async fn start_send(
 
         let ip = peer.ip.clone();
         let port = peer.tcp_port;
+        let tid = transfer_id.clone();
         tokio::spawn(async move {
-            info!("Conectando a receptor en {}:{}...", ip, port);
+            info!("[sender → {}:{}] Conectando para enviar TransferAnnounce...", ip, port);
             match TcpStream::connect(format!("{}:{}", ip, port)).await {
                 Ok(stream) => {
-                    info!("Conexión exitosa con {}. Enviando anuncio de transferencia...", ip);
                     let mut buf = BufStream::new(stream);
-                    if let Err(e) = write_frame(&mut buf, &announce, &[]).await {
-                        error!("Error enviando anuncio a {}: {}", ip, e);
-                    } else {
-                        info!("Anuncio enviado correctamente a {}. El receptor ahora es parte del enjambre.", ip);
+                    match write_frame(&mut buf, &announce, &[]).await {
+                        Ok(_) => info!("[sender → {}] TransferAnnounce enviado. Receptor unido al enjambre [{}]", ip, tid),
+                        Err(e) => error!("[sender → {}] Error al enviar TransferAnnounce: {}", ip, e),
                     }
                 }
                 Err(e) => {
-                    error!("No se pudo conectar con el receptor {} en el puerto {}: {}", ip, port, e);
+                    error!("[sender → {}:{}] No se pudo conectar: {}", ip, port, e);
                 }
             }
         });
     }
+
+    // El sender ya tiene todos los chunks: marcar como completado y notificar la UI
+    if let Some(mut t) = state.active_transfers.get_mut(&transfer_id) {
+        t.status = TransferStatus::Completed;
+    }
+    let _ = app_handle.emit("transfer-complete", &transfer_id);
+    info!("[sender] Enjambre activado. {} anuncios enviados. Sirviendo chunks bajo demanda.", peer_count);
 
     Ok(transfer_id)
 }

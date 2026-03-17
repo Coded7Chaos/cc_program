@@ -7,33 +7,51 @@ import { ActiveTransfer, FileInfo } from '../models/transfer.model';
 @Injectable({ providedIn: 'root' })
 export class TauriBridgeService {
 
+  private isTauri(): boolean {
+    return !!(window as any).__TAURI_INTERNALS__;
+  }
+
   // ─── Peer Commands ──────────────────────────────────────────────────────────
 
-  getPeers(): Promise<PeerEntry[]> {
+  async getPeers(): Promise<PeerEntry[]> {
+    if (!this.isTauri()) return [];
     return invoke<PeerEntry[]>('get_peers');
   }
 
-  refreshPeers(): Promise<void> {
+  async refreshPeers(): Promise<void> {
+    if (!this.isTauri()) return;
     return invoke<void>('refresh_peers');
   }
 
-  getLocalPeerId(): Promise<string> {
+  async checkPeersOnline(peerIds: string[]): Promise<string[]> {
+    if (!this.isTauri()) return peerIds; // En modo browser asumir todos online
+    return invoke<string[]>('check_peers_online', { peerIds });
+  }
+
+  async getLocalPeerId(): Promise<string> {
+    if (!this.isTauri()) return 'browser-mode';
     return invoke<string>('get_local_peer_id');
   }
 
   // ─── File Commands ──────────────────────────────────────────────────────────
 
-  openFileDialog(): Promise<string | null> {
+  async openFileDialog(): Promise<string | null> {
+    if (!this.isTauri()) {
+      alert('Esta función solo está disponible en la versión de escritorio.');
+      return null;
+    }
     return invoke<string | null>('open_file_dialog');
   }
 
-  getFileInfo(path: string): Promise<FileInfo> {
+  async getFileInfo(path: string): Promise<FileInfo> {
+    if (!this.isTauri()) throw new Error('Not in Tauri');
     return invoke<FileInfo>('get_file_info', { path });
   }
 
   // ─── Transfer Commands ──────────────────────────────────────────────────────
 
-  sendFile(path: string, destPath: string, targetPeerIds: string[]): Promise<string> {
+  async sendFile(path: string, destPath: string, targetPeerIds: string[]): Promise<string> {
+    if (!this.isTauri()) throw new Error('Not in Tauri');
     return invoke<string>('send_file', {
       path,
       destPath,
@@ -41,11 +59,13 @@ export class TauriBridgeService {
     });
   }
 
-  getActiveTransfers(): Promise<ActiveTransfer[]> {
+  async getActiveTransfers(): Promise<ActiveTransfer[]> {
+    if (!this.isTauri()) return [];
     return invoke<ActiveTransfer[]>('get_active_transfers');
   }
 
-  getTcpPort(): Promise<number> {
+  async getTcpPort(): Promise<number> {
+    if (!this.isTauri()) return 0;
     return invoke<number>('get_app_tcp_port');
   }
 
@@ -93,6 +113,12 @@ export class TauriBridgeService {
 
   onScanProgress(callback: (payload: { scanned: number; total: number; found: number }) => void): Promise<UnlistenFn> {
     return listen<{ scanned: number; total: number; found: number }>('scan-progress', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  onHashProgress(callback: (progress: number) => void): Promise<UnlistenFn> {
+    return listen<number>('hash-progress', (event) => {
       callback(event.payload);
     });
   }

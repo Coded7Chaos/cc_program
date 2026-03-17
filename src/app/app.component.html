@@ -1,4 +1,22 @@
 <div class="app-layout">
+  <!-- Global Loader Overlay -->
+  @if (transferService.isPreparing()) {
+    <div class="global-overlay">
+      <div class="loader-card">
+        <div class="loader-spinner"></div>
+        <h3>Preparando archivo masivo...</h3>
+        <p>Calculando firmas de enjambre P2P para asegurar la integridad de la red.</p>
+        
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" [style.width.%]="transferService.prepareProgress()"></div>
+          </div>
+          <span class="progress-text">{{ transferService.prepareProgress() | number:'1.0-0' }}%</span>
+        </div>
+      </div>
+    </div>
+  }
+
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar__brand">

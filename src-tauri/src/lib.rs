@@ -142,6 +142,7 @@ pub fn run() {
             commands::config::get_app_tcp_port,
             commands::peers::get_peers,
             commands::peers::refresh_peers,
+            commands::peers::check_peers_online,
             commands::files::open_file_dialog,
             commands::files::get_file_info,
             commands::transfers::send_file,

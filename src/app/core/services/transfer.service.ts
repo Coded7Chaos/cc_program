@@ -7,9 +7,13 @@ import { UnlistenFn } from '@tauri-apps/api/event';
 export class TransferService implements OnDestroy {
   private readonly _transfers = signal<ActiveTransfer[]>([]);
   private readonly _speeds = signal<Map<string, number>>(new Map());
+  private readonly _isPreparing = signal(false);
+  private readonly _prepareProgress = signal(0);
 
   readonly transfers = this._transfers.asReadonly();
   readonly speeds = this._speeds.asReadonly();
+  readonly isPreparing = this._isPreparing.asReadonly();
+  readonly prepareProgress = this._prepareProgress.asReadonly();
 
   private unlistenFns: UnlistenFn[] = [];
 
@@ -20,6 +24,11 @@ export class TransferService implements OnDestroy {
   private async init(): Promise<void> {
     const existing = await this.bridge.getActiveTransfers().catch(() => []);
     this._transfers.set(existing);
+
+    const unlistenHash = await this.bridge.onHashProgress((progress) => {
+      this._isPreparing.set(progress < 100);
+      this._prepareProgress.set(progress);
+    });
 
     const unlistenIncoming = await this.bridge.onTransferIncoming((transfer) => {
       this._transfers.update(ts => [...ts, transfer]);
@@ -64,7 +73,7 @@ export class TransferService implements OnDestroy {
       );
     });
 
-    this.unlistenFns.push(unlistenIncoming, unlistenProgress, unlistenComplete, unlistenError);
+    this.unlistenFns.push(unlistenHash, unlistenIncoming, unlistenProgress, unlistenComplete, unlistenError);
   }
 
   async cancel(transferId: string): Promise<void> {

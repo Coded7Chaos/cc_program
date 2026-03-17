@@ -40,7 +40,7 @@
       [disabled]="!canSend"
       class="btn-send"
     >
-      {{ sending() ? 'Enviando...' : 'Enviar' }}
+      {{ checking() ? 'Verificando...' : sending() ? 'Iniciando...' : 'Enviar' }}
     </button>
   </div>
 </div>

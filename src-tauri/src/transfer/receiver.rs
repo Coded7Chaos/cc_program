@@ -68,8 +68,16 @@ async fn handle_transfer_announce(
     state: Arc<AppState>,
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("Archivo: '{}' ({} chunks)", announce.file_name, announce.total_chunks);
-    info!("Origen: {}", announce.sender_ip);
+    info!("╔══════════════════════════════════════╗");
+    info!("║  NUEVA TRANSFERENCIA ENTRANTE (P2P)  ║");
+    info!("╚══════════════════════════════════════╝");
+    info!("[receiver] Archivo: '{}' | {} chunks | {} bytes", announce.file_name, announce.total_chunks, announce.file_size);
+    info!("[receiver] Origen: {} (peer_id: {})", announce.sender_ip, announce.sender_peer_id);
+    info!("[receiver] Destino local: {}/{}", announce.destination_path, announce.file_name);
+    info!("[receiver] Enjambre recibido: {} peers", announce.swarm.len());
+    for p in &announce.swarm {
+        info!("[receiver]   peer {} @ {}:{}", p.peer_id, p.ip, p.tcp_port);
+    }
 
     // 1. Registrar en el Tracker el enjambre recibido
     {
@@ -87,9 +95,9 @@ async fn handle_transfer_announce(
 
     // 2. Preparar el archivo local
     let dest_path = Path::new(&announce.destination_path).join(&announce.file_name);
-    info!("Pre-asignando espacio en disco en: {:?}", dest_path);
+    info!("[receiver] Pre-asignando {} bytes en disco: {:?}", announce.file_size, dest_path);
     if let Err(e) = preallocate_file(&dest_path, announce.file_size) {
-        error!("Error al pre-asignar archivo: {}", e);
+        error!("[receiver] Error al pre-asignar archivo: {} — verifica que el directorio exista y tengas permisos", e);
     }
 
     // 3. Registrar estado de la transferencia
@@ -115,24 +123,28 @@ async fn handle_transfer_announce(
     state.active_transfers.insert(announce.transfer_id.clone(), active.clone());
     let _ = app_handle.emit("transfer-incoming", &active);
 
-    // 4. Aceptar la transferencia
-    let accepted = TransferAccepted {
-        msg_type: TcpMsgType::TransferAccepted,
-        transfer_id: announce.transfer_id.clone(),
-        peer_id: state.peer_id.clone(),
-    };
-    write_frame(&mut stream, &accepted, &[]).await?;
-    info!("Transferencia aceptada. Iniciando motor de descarga P2P...");
-
-    // 5. Lanzar hilo de descarga P2P activa
+    // 5. Lanzar hilo de descarga P2P activa ANTES de responder al sender.
+    // Así el downloader siempre arranca aunque el sender haya cerrado la conexión.
+    info!("[receiver] Lanzando motor de descarga P2P para '{}' ({} chunks)...", announce.file_name, announce.total_chunks);
     let state_clone = state.clone();
     let app_handle_clone = app_handle.clone();
     let announce_clone = announce.clone();
     tokio::spawn(async move {
         if let Err(e) = run_p2p_downloader(announce_clone, state_clone, app_handle_clone).await {
-            error!("Error fatal en motor P2P: {}", e);
+            error!("[receiver] Error fatal en motor P2P: {}", e);
         }
     });
+
+    // 4. Intentar responder al sender (best-effort: el sender puede haber cerrado ya la conexión)
+    let accepted = TransferAccepted {
+        msg_type: TcpMsgType::TransferAccepted,
+        transfer_id: announce.transfer_id.clone(),
+        peer_id: state.peer_id.clone(),
+    };
+    match write_frame(&mut stream, &accepted, &[]).await {
+        Ok(_) => info!("[receiver] TransferAccepted enviado al sender."),
+        Err(e) => info!("[receiver] No se pudo enviar TransferAccepted (sender cerró la conexión): {} — esto es normal.", e),
+    }
 
     Ok(())
 }
@@ -145,12 +157,14 @@ async fn run_p2p_downloader(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let transfer_id = &announce.transfer_id;
     let total_chunks = announce.total_chunks;
-    
+
     let config = state.config.read().await;
-    let semaphore = Arc::new(Semaphore::new(config.max_concurrent_chunks));
+    let max_concurrent = config.max_concurrent_chunks;
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
     drop(config);
 
-    info!("Motor P2P: Iniciando descarga de {} piezas concurrentes.", semaphore.available_permits());
+    info!("[p2p-downloader] Iniciando descarga '{}' | {} chunks | {} descargas simultáneas",
+        announce.file_name, total_chunks, max_concurrent);
 
     let mut handles = Vec::new();
 
@@ -176,21 +190,22 @@ async fn run_p2p_downloader(
             };
 
             let Some(target_peer) = peer else {
-                debug!("Pieza {} no disponible aún en ningún peer. Reintentando luego...", chunk_index);
-                return; 
+                warn!("[p2p-downloader] Chunk {} no disponible en ningún peer todavía — se omite en esta ronda", chunk_index);
+                return;
             };
 
             // 2. Descargar de ese peer
+            debug!("[p2p-downloader] Chunk {}/{} → descargando de {}:{}", chunk_index + 1, ann_c.total_chunks, target_peer.ip, target_peer.tcp_port);
             if let Err(e) = download_chunk_from_peer(&target_peer, chunk_index, &ann_c, &state_c, &app_c).await {
-                error!("Error descargando pieza {} de {}: {}", chunk_index, target_peer.ip, e);
+                error!("[p2p-downloader] Error descargando chunk {} de {}: {}", chunk_index, target_peer.ip, e);
             }
         });
         handles.push(h);
     }
 
     for h in handles { let _ = h.await; }
-    info!("Motor P2P: Proceso de descarga finalizado para {}", transfer_id);
-    
+    info!("[p2p-downloader] Proceso de descarga finalizado para transfer_id={}", transfer_id);
+
     Ok(())
 }
 
@@ -225,28 +240,39 @@ async fn download_chunk_from_peer(
     let dest_path = Path::new(&announce.destination_path).join(&announce.file_name);
     write_chunk_at_offset(&dest_path, chunk_index, announce.chunk_size, &data)?;
 
-    // 5. Actualizar estado local
-    let mut is_complete = false;
-    if let Some(mut t) = state.active_transfers.get_mut(&announce.transfer_id) {
-        t.chunks_done[chunk_index as usize] = true;
-        t.bytes_transferred += data.len() as u64;
-        is_complete = t.chunks_completed() == t.total_chunks;
-    }
+    // 5. Actualizar estado local y capturar métricas para el evento
+    let (is_complete, chunks_completed, bytes_transferred) = {
+        if let Some(mut t) = state.active_transfers.get_mut(&announce.transfer_id) {
+            t.chunks_done[chunk_index as usize] = true;
+            t.bytes_transferred += data.len() as u64;
+            let done = t.chunks_completed();
+            let complete = done == t.total_chunks;
+            (complete, done, t.bytes_transferred)
+        } else {
+            (false, 0, 0u64)
+        }
+    };
 
     // 6. Notificar al enjambre (HAVE)
     broadcast_have(announce.transfer_id.clone(), chunk_index, state).await;
 
-    // 7. Emitir progreso
+    // 7. Emitir progreso con todos los campos que espera el frontend
     let _ = app_handle.emit("transfer-progress", serde_json::json!({
         "transfer_id": announce.transfer_id,
-        "chunks_completed": chunk_index + 1, 
+        "chunks_completed": chunks_completed,
         "total_chunks": announce.total_chunks,
+        "bytes_transferred": bytes_transferred,
+        "speed_bps": 0u64,
         "status": if is_complete { "Completed" } else { "InProgress" }
     }));
 
     if is_complete {
-        info!("¡Transferencia '{}' completada con éxito!", announce.file_name);
+        info!("[p2p-downloader] ✓ TRANSFERENCIA COMPLETADA: '{}' — {} bytes recibidos",
+            announce.file_name, bytes_transferred);
         let _ = app_handle.emit("transfer-complete", &announce.transfer_id);
+    } else {
+        debug!("[p2p-downloader] Chunk {}/{} completado ({} bytes total transferidos hasta ahora)",
+            chunks_completed, announce.total_chunks, bytes_transferred);
     }
 
     Ok(())
@@ -286,16 +312,19 @@ async fn handle_chunk_request(
     mut stream: BufStream<TcpStream>,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    debug!("[chunk-server] Solicitud: chunk {} para transfer {} de peer {}",
+        req.chunk_index, req.transfer_id, req.requester_id);
+
     let transfer = state.active_transfers.get(&req.transfer_id);
-    let Some(t) = transfer else { 
-        warn!("Solicitud de chunk para transfer ID desconocido: {}", req.transfer_id);
-        return Ok(()); 
+    let Some(t) = transfer else {
+        warn!("[chunk-server] Transfer ID '{}' desconocido — no puedo servir chunk {}", req.transfer_id, req.chunk_index);
+        return Ok(());
     };
 
     // Solo servir si ya tenemos la pieza
-    if !t.chunks_done[req.chunk_index as usize] { 
-        warn!("Peer solicitó pieza {} que aún no tenemos", req.chunk_index);
-        return Ok(()); 
+    if !t.chunks_done[req.chunk_index as usize] {
+        warn!("[chunk-server] Chunk {} solicitado pero no lo tenemos aún — peer debería reintentar", req.chunk_index);
+        return Ok(());
     }
 
     let file_path = t.file_path.clone();
