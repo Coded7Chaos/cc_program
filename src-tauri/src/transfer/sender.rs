@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tokio::net::TcpStream;
 use tokio::io::BufStream;
-use tracing::info;
+use tracing::{info, error, warn};
 use uuid::Uuid;
 
 use crate::protocol::codec::write_frame;
@@ -33,7 +33,14 @@ pub async fn start_send(
     state: Arc<AppState>,
     _app_handle: AppHandle,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    info!("--- INICIANDO PROCESO DE ENVÍO P2P ---");
+    
     let path = Path::new(&file_path);
+    if !path.exists() {
+        error!("Error crítico: El archivo no existe en {}", file_path);
+        return Err("Archivo no encontrado".into());
+    }
+
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -42,14 +49,19 @@ pub async fn start_send(
     let file_size = std::fs::metadata(path)?.len();
     let total_chunks = chunk_count(file_size, CHUNK_SIZE);
 
-    info!("Preparando enjambre para {} ({} chunks)...", file_name, total_chunks);
+    info!("Archivo: '{}' ({} bytes, {} chunks)", file_name, file_size, total_chunks);
 
     // 1. Calcular hashes
     let path_clone = path.to_path_buf();
-    let chunk_hashes = tokio::task::spawn_blocking(move || build_chunk_map(&path_clone, CHUNK_SIZE))
-        .await??;
+    let app_clone = _app_handle.clone();
+    info!("Calculando hashes SHA1 para el enjambre...");
+    let chunk_hashes = tokio::task::spawn_blocking(move || {
+        build_chunk_map(&path_clone, CHUNK_SIZE, Some(app_clone))
+    }).await??;
+    info!("Hashes calculados correctamente.");
 
     let transfer_id = Uuid::new_v4().to_string();
+    info!("ID de transferencia asignado: {}", transfer_id);
 
     // 2. Construir la lista del Enjambre (Swarm)
     let mut swarm = Vec::new();
@@ -57,7 +69,7 @@ pub async fn start_send(
     swarm.push(SwarmPeer {
         peer_id: state.peer_id.clone(),
         ip: state.local_ip.clone(),
-        tcp_port: 47833, // Puerto estándar de la app
+        tcp_port: *state.tcp_port.read().await,
     });
 
     for peer_id in &target_peer_ids {
@@ -67,8 +79,11 @@ pub async fn start_send(
                 ip: peer.ip.clone(),
                 tcp_port: peer.tcp_port,
             });
+        } else {
+            warn!("Advertencia: Peer ID {} no encontrado en el mapa", peer_id);
         }
     }
+    info!("Enjambre configurado con {} participantes.", swarm.len());
 
     // 3. Registrar en el Tracker local que nosotros tenemos todo
     {
@@ -103,6 +118,7 @@ pub async fn start_send(
     state.active_transfers.insert(transfer_id.clone(), active);
 
     // 5. Notificar a todos los peers para que se unan al enjambre
+    info!("Notificando a los receptores para iniciar el flujo P2P...");
     for peer_id in target_peer_ids {
         let peer = match state.peers.get(&peer_id) {
             Some(p) => p.clone(),
@@ -123,10 +139,23 @@ pub async fn start_send(
             swarm: swarm.clone(),
         };
 
+        let ip = peer.ip.clone();
+        let port = peer.tcp_port;
         tokio::spawn(async move {
-            if let Ok(stream) = TcpStream::connect(format!("{}:{}", peer.ip, peer.tcp_port)).await {
-                let mut buf = BufStream::new(stream);
-                let _ = write_frame(&mut buf, &announce, &[]).await;
+            info!("Conectando a receptor en {}:{}...", ip, port);
+            match TcpStream::connect(format!("{}:{}", ip, port)).await {
+                Ok(stream) => {
+                    info!("Conexión exitosa con {}. Enviando anuncio de transferencia...", ip);
+                    let mut buf = BufStream::new(stream);
+                    if let Err(e) = write_frame(&mut buf, &announce, &[]).await {
+                        error!("Error enviando anuncio a {}: {}", ip, e);
+                    } else {
+                        info!("Anuncio enviado correctamente a {}. El receptor ahora es parte del enjambre.", ip);
+                    }
+                }
+                Err(e) => {
+                    error!("No se pudo conectar con el receptor {} en el puerto {}: {}", ip, port, e);
+                }
             }
         });
     }

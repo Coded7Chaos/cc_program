@@ -47,17 +47,28 @@ pub fn sha1_file(path: &Path) -> Result<String, ChunkerError> {
 }
 
 /// Construye el mapa de hashes: Vec<sha1_hex> con un elemento por chunk
-pub fn build_chunk_map(path: &Path, chunk_size: u32) -> Result<Vec<String>, ChunkerError> {
+pub fn build_chunk_map(
+    path: &std::path::Path, 
+    chunk_size: u32,
+    app: Option<tauri::AppHandle>
+) -> Result<Vec<String>, ChunkerError> {
     let file_size = std::fs::metadata(path)?.len();
     let count = chunk_count(file_size, chunk_size);
     let mut file = File::open(path)?;
     let mut hashes = Vec::with_capacity(count as usize);
 
-    for _ in 0..count {
+    for i in 0..count {
         let mut buf = vec![0u8; chunk_size as usize];
         let n = file.read(&mut buf)?;
         buf.truncate(n);
         hashes.push(sha1_hex(&buf));
+
+        if let Some(ref h) = app {
+            if i % 10 == 0 || i == count - 1 {
+                let progress = (i as f64 / count as f64) * 100.0;
+                let _ = tauri::Emitter::emit(h, "hash-progress", progress);
+            }
+        }
     }
 
     Ok(hashes)

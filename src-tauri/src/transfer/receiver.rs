@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::BufStream;
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::protocol::codec::{read_typed_frame, write_frame};
 use crate::protocol::messages::{
@@ -43,16 +43,19 @@ pub async fn handle_incoming_connection(
 
     match msg {
         TcpMessage::TransferAnnounce(announce) => {
+            info!("--- NUEVA TRANSFERENCIA ENTRANTE ---");
             handle_transfer_announce(announce, buf_stream, state, app_handle).await
         }
         TcpMessage::ChunkRequest(req) => {
+            debug!("Solicitud de chunk recibida: idx {} de {}", req.chunk_index, req.requester_id);
             handle_chunk_request(req, buf_stream, state).await
         }
         TcpMessage::HaveChunk(have) => {
+            debug!("Notificación HAVE recibida: chunk {} de {}", have.chunk_index, have.peer_id);
             handle_have_chunk(have, state).await
         }
         _ => {
-            debug!("Mensaje inesperado al inicio de conexión TCP");
+            warn!("Mensaje TCP no reconocido o fuera de contexto");
             Ok(())
         }
     }
@@ -65,14 +68,18 @@ async fn handle_transfer_announce(
     state: Arc<AppState>,
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("Transferencia anunciada: {} de {}", announce.file_name, announce.sender_ip);
+    info!("Archivo: '{}' ({} chunks)", announce.file_name, announce.total_chunks);
+    info!("Origen: {}", announce.sender_ip);
 
     // 1. Registrar en el Tracker el enjambre recibido
     {
         let mut tracker = state.tracker.lock().await;
         let entry = tracker.get_or_create(&announce.transfer_id);
         entry.set_swarm(announce.swarm.clone());
+        info!("Enjambre actualizado con {} peers.", announce.swarm.len());
+        
         // El sender original ya tiene todos los chunks
+        entry.add_peer_chunk(announce.sender_peer_id.clone(), 0); // At least one to start
         for i in 0..announce.total_chunks {
             entry.add_peer_chunk(announce.sender_peer_id.clone(), i);
         }
@@ -80,7 +87,10 @@ async fn handle_transfer_announce(
 
     // 2. Preparar el archivo local
     let dest_path = Path::new(&announce.destination_path).join(&announce.file_name);
-    let _ = preallocate_file(&dest_path, announce.file_size);
+    info!("Pre-asignando espacio en disco en: {:?}", dest_path);
+    if let Err(e) = preallocate_file(&dest_path, announce.file_size) {
+        error!("Error al pre-asignar archivo: {}", e);
+    }
 
     // 3. Registrar estado de la transferencia
     let active = ActiveTransfer {
@@ -112,6 +122,7 @@ async fn handle_transfer_announce(
         peer_id: state.peer_id.clone(),
     };
     write_frame(&mut stream, &accepted, &[]).await?;
+    info!("Transferencia aceptada. Iniciando motor de descarga P2P...");
 
     // 5. Lanzar hilo de descarga P2P activa
     let state_clone = state.clone();
@@ -119,7 +130,7 @@ async fn handle_transfer_announce(
     let announce_clone = announce.clone();
     tokio::spawn(async move {
         if let Err(e) = run_p2p_downloader(announce_clone, state_clone, app_handle_clone).await {
-            error!("Error en downloader P2P: {}", e);
+            error!("Error fatal en motor P2P: {}", e);
         }
     });
 
@@ -139,6 +150,8 @@ async fn run_p2p_downloader(
     let semaphore = Arc::new(Semaphore::new(config.max_concurrent_chunks));
     drop(config);
 
+    info!("Motor P2P: Iniciando descarga de {} piezas concurrentes.", semaphore.available_permits());
+
     let mut handles = Vec::new();
 
     for chunk_index in 0..total_chunks {
@@ -154,6 +167,7 @@ async fn run_p2p_downloader(
 
         let h = tokio::spawn(async move {
             let _permit = permit;
+            
             // 1. Buscar quién tiene la pieza
             let peer = {
                 let tracker = state_c.tracker.lock().await;
@@ -162,18 +176,20 @@ async fn run_p2p_downloader(
             };
 
             let Some(target_peer) = peer else {
-                return; // Nadie la tiene aún, el loop principal deberá re-intentar piezas faltantes
+                debug!("Pieza {} no disponible aún en ningún peer. Reintentando luego...", chunk_index);
+                return; 
             };
 
             // 2. Descargar de ese peer
             if let Err(e) = download_chunk_from_peer(&target_peer, chunk_index, &ann_c, &state_c, &app_c).await {
-                debug!("Error descargando chunk {} de {}: {}", chunk_index, target_peer.ip, e);
+                error!("Error descargando pieza {} de {}: {}", chunk_index, target_peer.ip, e);
             }
         });
         handles.push(h);
     }
 
     for h in handles { let _ = h.await; }
+    info!("Motor P2P: Proceso de descarga finalizado para {}", transfer_id);
     
     Ok(())
 }
@@ -185,6 +201,7 @@ async fn download_chunk_from_peer(
     state: &Arc<AppState>,
     app_handle: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    debug!("Conectando a {}:{} para pieza {}...", peer.ip, peer.tcp_port, chunk_index);
     let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.tcp_port)).await?;
     let mut buf_stream = BufStream::new(stream);
 
@@ -222,12 +239,13 @@ async fn download_chunk_from_peer(
     // 7. Emitir progreso
     let _ = app_handle.emit("transfer-progress", serde_json::json!({
         "transfer_id": announce.transfer_id,
-        "chunks_completed": chunk_index + 1, // simplificado
+        "chunks_completed": chunk_index + 1, 
         "total_chunks": announce.total_chunks,
         "status": if is_complete { "Completed" } else { "InProgress" }
     }));
 
     if is_complete {
+        info!("¡Transferencia '{}' completada con éxito!", announce.file_name);
         let _ = app_handle.emit("transfer-complete", &announce.transfer_id);
     }
 
@@ -269,17 +287,23 @@ async fn handle_chunk_request(
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let transfer = state.active_transfers.get(&req.transfer_id);
-    let Some(t) = transfer else { return Ok(()); };
+    let Some(t) = transfer else { 
+        warn!("Solicitud de chunk para transfer ID desconocido: {}", req.transfer_id);
+        return Ok(()); 
+    };
 
     // Solo servir si ya tenemos la pieza
-    if !t.chunks_done[req.chunk_index as usize] { return Ok(()); }
+    if !t.chunks_done[req.chunk_index as usize] { 
+        warn!("Peer solicitó pieza {} que aún no tenemos", req.chunk_index);
+        return Ok(()); 
+    }
 
     let file_path = t.file_path.clone();
     let chunk_size = t.chunk_size;
     let chunk_hash = t.chunk_hashes[req.chunk_index as usize].clone();
     drop(t);
 
-    // Leer del disco y enviar (ahora pasando el hash esperado para verificar antes de enviar)
+    // Leer del disco y enviar
     let hash_for_read = chunk_hash.clone();
     let data = tokio::task::spawn_blocking(move || {
         read_chunk(Path::new(&file_path), req.chunk_index, chunk_size, &hash_for_read)
@@ -293,7 +317,9 @@ async fn handle_chunk_request(
         chunk_size: data.len() as u32,
     };
 
-    write_frame(&mut stream, &res, &data).await?;
+    if let Err(e) = write_frame(&mut stream, &res, &data).await {
+        error!("Error enviando pieza {} a un peer: {}", req.chunk_index, e);
+    }
     Ok(())
 }
 

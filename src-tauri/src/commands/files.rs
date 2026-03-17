@@ -1,9 +1,9 @@
 use std::path::Path;
-use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, AppHandle};
+use sha1::{Digest, Sha1};
+use std::fs::File;
+use std::io::Read;
 use tauri_plugin_dialog::DialogExt;
-use crate::state::AppState;
-use crate::transfer::chunker::sha1_file;
 
 /// Información de un archivo seleccionado
 #[derive(serde::Serialize)]
@@ -16,9 +16,7 @@ pub struct FileInfo {
 
 /// Abre el selector de archivos nativo y retorna la ruta seleccionada
 #[tauri::command]
-pub async fn open_file_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
-
+pub async fn open_file_dialog(app: AppHandle) -> Result<Option<String>, String> {
     let path = app
         .dialog()
         .file()
@@ -27,27 +25,38 @@ pub async fn open_file_dialog(app: tauri::AppHandle) -> Result<Option<String>, S
     Ok(path.map(|p| p.to_string()))
 }
 
-/// Retorna información de un archivo: nombre, tamaño y SHA1 completo
+/// Retorna información de un archivo con progreso de hash
 #[tauri::command]
-pub async fn get_file_info(path: String) -> Result<FileInfo, String> {
+pub async fn get_file_info(path: String, app: AppHandle) -> Result<FileInfo, String> {
     let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("El archivo no existe: {}", path));
+    }
 
-    let name = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("archivo")
-        .to_string();
+    let name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("archivo").to_string();
+    let size = std::fs::metadata(file_path).map_err(|e| format!("Error: {}", e))?.len();
 
-    let size = std::fs::metadata(file_path)
-        .map_err(|e| format!("Error al leer metadata: {}", e))?
-        .len();
+    let path_buf = file_path.to_path_buf();
+    let sha1 = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let mut file = File::open(&path_buf).map_err(|e| e.to_string())?;
+        let mut hasher = Sha1::new();
+        let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
+        let mut processed = 0u64;
 
-    // Calcular SHA1 en thread bloqueante para no bloquear el runtime
-    let path_clone = file_path.to_path_buf();
-    let sha1 = tokio::task::spawn_blocking(move || sha1_file(&path_clone))
-        .await
-        .map_err(|e| format!("Error en task: {}", e))?
-        .map_err(|e| format!("Error calculando SHA1: {}", e))?;
+        loop {
+            let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 { break; }
+            hasher.update(&buf[..n]);
+            processed += n as u64;
+            
+            // Emitir progreso cada 10MB aproximadamente para no saturar el canal
+            if processed % (10 * 1024 * 1024) == 0 || processed == size {
+                let progress = (processed as f64 / size as f64) * 100.0;
+                let _ = app.emit("hash-progress", progress);
+            }
+        }
+        Ok(format!("{:x}", hasher.finalize()))
+    }).await.map_err(|e| e.to_string())??;
 
     Ok(FileInfo { name, path, size, sha1 })
 }

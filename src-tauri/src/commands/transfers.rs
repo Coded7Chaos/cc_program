@@ -13,7 +13,13 @@ pub async fn send_file(
     state: State<'_, Arc<AppState>>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    tracing::info!("--- COMANDO SEND_FILE RECIBIDO ---");
+    tracing::info!("Ruta origen: {}", path);
+    tracing::info!("Ruta destino: {}", dest_path);
+    tracing::info!("Peers objetivo: {:?}", target_peer_ids);
+
     if target_peer_ids.is_empty() {
+        tracing::error!("Error: Lista de peers vacía");
         return Err("Debe seleccionar al menos un peer destino".to_string());
     }
 
@@ -21,7 +27,10 @@ pub async fn send_file(
 
     sender::start_send(path, dest_path, target_peer_ids, state_clone, app_handle)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            tracing::error!("Error al iniciar transferencia: {}", e);
+            e.to_string()
+        })
 }
 
 /// Retorna todas las transferencias activas
