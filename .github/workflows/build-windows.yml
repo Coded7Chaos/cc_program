@@ -1,0 +1,63 @@
+name: Build Windows installer
+
+# Corre en runners de GitHub (Windows Server), no en tu máquina.
+# Se dispara al pushear a main, al abrir un PR, o manualmente desde la pestaña Actions.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout del repo
+        uses: actions/checkout@v4
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Instalar Rust (stable, target MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Cachea target/ de Cargo entre corridas para que los builds siguientes
+      # no recompilen todas las dependencias de Rust desde cero (Tokio, Tauri, etc.)
+      - name: Cachear dependencias de Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Instalar dependencias del frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Compilar y empaquetar (pnpm tauri build)
+        run: pnpm tauri build
+
+      # Sube el instalador NSIS (.exe) y el MSI como artifacts descargables
+      # desde la pestaña "Actions" del run, sección "Artifacts".
+      - name: Subir instalador NSIS (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Subir instalador MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-msi
+          path: src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error

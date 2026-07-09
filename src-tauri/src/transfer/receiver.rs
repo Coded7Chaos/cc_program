@@ -229,6 +229,31 @@ async fn run_p2p_downloader(
     }
 
     for h in handles { let _ = h.await; }
+
+    // Si quedaron chunks sin descargar la transferencia falló: hay que reflejarlo en el
+    // estado y avisar a la UI. Si no, la transferencia queda "InProgress" para siempre
+    // y el usuario no tiene ninguna señal de que algo salió mal (firewall, peer caído, etc.).
+    let progreso = state
+        .active_transfers
+        .get(transfer_id)
+        .map(|t| (t.chunks_completed(), t.total_chunks));
+    if let Some((done, total)) = progreso {
+        if done < total {
+            let msg = format!(
+                "Descarga incompleta: {}/{} chunks recibidos. Verifica el firewall de Windows y la conectividad con el sender y los demás peers.",
+                done, total
+            );
+            error!("[p2p-downloader] {}", msg);
+            if let Some(mut t) = state.active_transfers.get_mut(transfer_id) {
+                t.status = TransferStatus::Failed(msg.clone());
+            }
+            let _ = app_handle.emit(
+                "transfer-error",
+                serde_json::json!({ "transfer_id": transfer_id, "error": msg }),
+            );
+        }
+    }
+
     info!("[p2p-downloader] Proceso de descarga finalizado para transfer_id={}", transfer_id);
 
     Ok(())
@@ -310,10 +335,13 @@ async fn broadcast_have(transfer_id: String, chunk_index: u32, state: &Arc<AppSt
         tracker.entries.get(&transfer_id).map(|e| e.swarm.clone()).unwrap_or_default()
     };
 
+    let my_port = *state.tcp_port.read().await;
     let msg = HaveChunk {
         msg_type: TcpMsgType::HaveChunk,
         transfer_id,
         peer_id: state.peer_id.clone(),
+        ip: state.local_ip.clone(),
+        tcp_port: my_port,
         chunk_index,
     };
 
@@ -384,6 +412,21 @@ async fn handle_have_chunk(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut tracker = state.tracker.lock().await;
     let entry = tracker.get_or_create(&have.transfer_id);
+    // El enjambre del announce identifica a los receptores con el peer_id del scanner
+    // ("ip:puerto"), pero los HAVE llegan con el UUID propio de cada peer. Si el UUID
+    // no figura en el enjambre, lo registramos con la IP/puerto que el propio peer
+    // reporta; sin esto get_peers_for_chunk nunca matchea y los receptores jamás
+    // se descargan chunks entre sí (todo caería siempre sobre el sender).
+    if !have.ip.is_empty()
+        && have.tcp_port != 0
+        && !entry.swarm.iter().any(|p| p.peer_id == have.peer_id)
+    {
+        entry.swarm.push(SwarmPeer {
+            peer_id: have.peer_id.clone(),
+            ip: have.ip.clone(),
+            tcp_port: have.tcp_port,
+        });
+    }
     entry.add_peer_chunk(have.peer_id, have.chunk_index);
     Ok(())
 }

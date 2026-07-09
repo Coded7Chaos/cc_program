@@ -126,6 +126,15 @@ pub struct HaveChunk {
     pub msg_type: TcpMsgType,
     pub transfer_id: String,
     pub peer_id: String,
+    /// IP y puerto del peer que anuncia. Necesarios porque el announce del sender
+    /// lista a los receptores con el peer_id del scanner ("ip:puerto"), mientras que
+    /// cada peer se identifica con su UUID propio: sin estos campos, el receptor de
+    /// un HAVE no puede ubicar al emisor en el enjambre y nunca le pediría chunks.
+    /// `default` para tolerar mensajes de versiones viejas de la app.
+    #[serde(default)]
+    pub ip: String,
+    #[serde(default)]
+    pub tcp_port: u16,
     pub chunk_index: u32,
 }
 

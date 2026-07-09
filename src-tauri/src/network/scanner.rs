@@ -38,8 +38,22 @@ fn current_epoch() -> u64 {
         .as_secs()
 }
 
-/// Detecta la subnet local y retorna la IP base y la cantidad de hosts (/24)
-fn get_local_subnet() -> Option<(Ipv4Addr, u32)> {
+/// Detecta la subnet local y retorna la IP base y la cantidad de hosts (/24).
+///
+/// La subnet DEBE derivarse de la misma IP que `get_local_ip()` eligió al arrancar
+/// (state.local_ip), porque esa función ya filtra adaptadores virtuales de
+/// VirtualBox/VMware/Docker. Si en cambio tomáramos "la primera interfaz" del sistema,
+/// en máquinas con VM software podríamos escanear la subnet host-only del adaptador
+/// virtual (p. ej. 192.168.56.0/24) y jamás encontrar las máquinas reales del laboratorio.
+fn get_local_subnet(local_ip: &str) -> Option<(Ipv4Addr, u32)> {
+    if let Ok(ip) = local_ip.parse::<Ipv4Addr>() {
+        let o = ip.octets();
+        if o[0] != 127 && !(o[0] == 169 && o[1] == 254) {
+            return Some((Ipv4Addr::new(o[0], o[1], o[2], 0), 254));
+        }
+    }
+
+    // Fallback: primera interfaz no-loopback/no-APIPA (solo si local_ip no es parseable)
     let addrs = if_addrs::get_if_addrs().ok()?;
     for iface in addrs {
         if iface.is_loopback() {
@@ -183,7 +197,7 @@ pub async fn run_subnet_scan(
     app_handle: AppHandle,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) {
-    let Some((base_ip, count)) = get_local_subnet() else {
+    let Some((base_ip, count)) = get_local_subnet(&state.local_ip) else {
         error!("No se pudo detectar subnet local");
         return;
     };

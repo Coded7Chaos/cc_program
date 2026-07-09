@@ -218,6 +218,26 @@ pub async fn start_send(
         warn!("  3. IP del receptor cambió desde el último escaneo");
     }
 
+    if delivered == 0 {
+        // Ningún receptor aceptó la conexión: no hay transferencia posible. Antes esto
+        // se marcaba igual como "Completed" y el usuario creía que el envío funcionó.
+        let msg = format!(
+            "Ningún receptor recibió el anuncio ({} fallidos). Causas típicas en Windows: \
+             el firewall bloquea el puerto de la app en los receptores, la app no está \
+             corriendo allí, o la IP cambió desde el último escaneo.",
+            failed
+        );
+        error!("[sender] {}", msg);
+        if let Some(mut t) = state.active_transfers.get_mut(&transfer_id) {
+            t.status = TransferStatus::Failed(msg.clone());
+        }
+        let _ = app_handle.emit(
+            "transfer-error",
+            serde_json::json!({ "transfer_id": transfer_id, "error": msg }),
+        );
+        return Ok(transfer_id);
+    }
+
     // El sender ya tiene todos los chunks: marcar como completado
     if let Some(mut t) = state.active_transfers.get_mut(&transfer_id) {
         t.status = TransferStatus::Completed;
