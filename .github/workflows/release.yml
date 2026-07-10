@@ -1,0 +1,72 @@
+name: Release (instalador + auto-update)
+
+# Publica un GitHub Release con el instalador NSIS firmado y el latest.json
+# que consume el auto-updater de la app al arrancar.
+#
+# Flujo para publicar una versión nueva:
+#   1. Subir "version" en src-tauri/tauri.conf.json (y package.json si quieres mantenerlos en sincronía)
+#   2. Commit + push a main
+#   3. Pestaña Actions → "Release (instalador + auto-update)" → Run workflow
+#      (o pushear un tag vX.Y.Z, también dispara)
+#
+# Requiere este secret del repo (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY → contenido de ~/.tauri/cc_program_updater.key
+# (No hace falta secret de contraseña: la llave se generó sin contraseña y
+#  GitHub no permite secrets con valor vacío.)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout del repo
+        uses: actions/checkout@v4
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Instalar Rust (stable, target MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cachear dependencias de Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Instalar dependencias del frontend
+        run: pnpm install --frozen-lockfile
+
+      # tauri-action compila, firma los artefactos de update, crea el Release
+      # (tag v<version> tomado de tauri.conf.json) y sube el instalador + latest.json
+      - name: Compilar, firmar y publicar Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # La llave se generó sin contraseña; string vacío = sin contraseña.
+          # (GitHub no permite secrets vacíos, por eso va hardcodeado aquí.)
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          tauriScript: pnpm tauri
+          tagName: v__VERSION__
+          releaseName: 'P2P File Deployer v__VERSION__'
+          releaseBody: 'Instalador para Windows. Las instalaciones existentes se actualizan solas al abrir la app.'
+          releaseDraft: false
+          prerelease: false

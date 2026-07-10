@@ -51,6 +51,15 @@
 
       <button
         class="nav-item"
+        [class.active]="activeTab() === 'logs'"
+        (click)="setTab('logs')"
+      >
+        <span class="nav-icon">📜</span>
+        <span>Registros</span>
+      </button>
+
+      <button
+        class="nav-item"
         [class.active]="activeTab() === 'settings'"
         (click)="setTab('settings')"
       >
@@ -86,6 +95,12 @@
     @if (activeTab() === 'transfers') {
       <div class="content-panel">
         <app-transfer-monitor />
+      </div>
+    }
+
+    @if (activeTab() === 'logs') {
+      <div class="content-panel">
+        <app-log-viewer />
       </div>
     }
 

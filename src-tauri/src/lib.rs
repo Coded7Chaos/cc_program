@@ -30,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Autostart: permite que la app arranque con el sistema operativo.
         // En Windows usa el registro (HKCU\...\Run), en macOS usa LaunchAgent.
         // No se habilita automáticamente; el usuario lo activa desde Configuración.
@@ -140,6 +141,16 @@ pub fn run() {
             // Guardar el runtime para que no se destruya
             app.manage(rt);
 
+            // Chequear actualizaciones en GitHub Releases al arrancar.
+            // Corre en background: si falla (sin internet, sin release publicado
+            // todavía, GitHub caído) la app sigue funcionando con normalidad.
+            {
+                let update_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    check_for_updates(update_handle).await;
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -156,6 +167,8 @@ pub fn run() {
             commands::transfers::send_file,
             commands::transfers::get_active_transfers,
             commands::transfers::cancel_transfer,
+            commands::logs::get_app_logs,
+            commands::logs::get_log_file_path,
         ])
         .on_window_event(|window, event| {
             // Minimizar a tray en lugar de cerrar
@@ -228,8 +241,52 @@ fn init_logging() {
     }
 }
 
+/// Chequea GitHub Releases al arrancar; si hay versión nueva la descarga,
+/// instala y reinicia la app. En Windows el instalador NSIS corre en modo
+/// "passive" (barra de progreso, sin preguntas) — puede aparecer un prompt UAC
+/// porque la instalación es perMachine.
+async fn check_for_updates(app: tauri::AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::warn!("[updater] Updater no disponible: {}", e);
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            info!(
+                "[updater] Nueva versión disponible: {} (instalada: {}). Descargando...",
+                update.version, update.current_version
+            );
+            let resultado = update
+                .download_and_install(
+                    |_bytes, _total| {},
+                    || info!("[updater] Descarga completada, instalando..."),
+                )
+                .await;
+            match resultado {
+                Ok(_) => {
+                    info!("[updater] Actualización instalada. Reiniciando la app...");
+                    app.restart();
+                }
+                Err(e) => tracing::error!("[updater] Error al instalar la actualización: {}", e),
+            }
+        }
+        Ok(None) => info!("[updater] La app está al día."),
+        Err(e) => tracing::warn!(
+            "[updater] No se pudo verificar actualizaciones (sin internet o sin releases publicados): {}",
+            e
+        ),
+    }
+}
+
 /// Devuelve la ruta del archivo de log según el sistema operativo.
-fn get_log_path() -> Option<String> {
+/// pub(crate) porque commands::logs la usa para la pantalla de logs de la UI.
+pub(crate) fn get_log_path() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         std::env::var("APPDATA").ok().map(|appdata| {

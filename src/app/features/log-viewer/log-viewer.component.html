@@ -1,0 +1,28 @@
+<div class="log-viewer">
+  <div class="log-viewer__header">
+    <div class="log-viewer__title">
+      <h2>Registros de la aplicación</h2>
+      <p class="log-viewer__path" *ngIf="logPath()">
+        Archivo: <code>{{ logPath() }}</code>
+      </p>
+    </div>
+
+    <div class="log-viewer__actions">
+      <span class="log-viewer__updated" *ngIf="lastUpdated()">
+        Actualizado {{ lastUpdated() | date:'HH:mm:ss' }}
+      </span>
+      <button
+        class="btn-toggle"
+        [class.btn-toggle--on]="autoRefresh()"
+        (click)="toggleAutoRefresh()"
+      >
+        {{ autoRefresh() ? 'Auto-refresco: ON' : 'Auto-refresco: OFF' }}
+      </button>
+      <button class="btn-refresh" [disabled]="loading()" (click)="refresh()">
+        {{ loading() ? 'Cargando...' : '↻ Actualizar' }}
+      </button>
+    </div>
+  </div>
+
+  <pre #logContainer class="log-viewer__content">{{ logs() || 'Sin registros todavía.' }}</pre>
+</div>

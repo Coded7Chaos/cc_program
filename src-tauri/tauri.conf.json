@@ -31,6 +31,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "installMode": "perMachine",
@@ -44,5 +45,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Coded7Chaos/cc_program/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVEREVGNEYzMEMyRkI2MDAKUldRQXRpOE04L1RlWFR3MkNmU3dCdS8wZ245RTg3NHJnUTAwclBWY1RjT1VQd3AydlMvaVJNYkMK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

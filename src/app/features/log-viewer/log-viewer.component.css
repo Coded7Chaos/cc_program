@@ -1,0 +1,86 @@
+.log-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+}
+
+.log-viewer__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.log-viewer__title h2 {
+  margin: 0 0 4px;
+  font-size: 1.2rem;
+}
+
+.log-viewer__path {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.7;
+  word-break: break-all;
+}
+
+.log-viewer__path code {
+  font-size: 0.75rem;
+}
+
+.log-viewer__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.log-viewer__updated {
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+.btn-refresh,
+.btn-toggle {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-refresh:hover,
+.btn-toggle:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-toggle--on {
+  border-color: #3fb950;
+  color: #3fb950;
+}
+
+.log-viewer__content {
+  flex: 1 1 auto;
+  min-height: 300px;
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

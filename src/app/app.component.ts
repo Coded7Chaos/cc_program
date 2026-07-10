@@ -4,6 +4,7 @@ import { RouterOutlet } from '@angular/router';
 import { PeerListComponent } from './features/peer-list/peer-list.component';
 import { FileSelectorComponent } from './features/file-selector/file-selector.component';
 import { TransferMonitorComponent } from './features/transfer-monitor/transfer-monitor.component';
+import { LogViewerComponent } from './features/log-viewer/log-viewer.component';
 import { PeerService } from './core/services/peer.service';
 import { TransferService } from './core/services/transfer.service';
 import { NotificationService } from './core/services/notification.service';
@@ -18,6 +19,7 @@ import { TauriBridgeService } from './core/services/tauri-bridge.service';
     PeerListComponent,
     FileSelectorComponent,
     TransferMonitorComponent,
+    LogViewerComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
@@ -28,7 +30,7 @@ export class AppComponent implements OnInit {
   readonly peerService = inject(PeerService);
   readonly transferService = inject(TransferService);
 
-  readonly activeTab = signal<'peers' | 'transfers' | 'settings'>('peers');
+  readonly activeTab = signal<'peers' | 'transfers' | 'settings' | 'logs'>('peers');
   readonly selectedPeerIds = signal<string[]>([]);
   readonly tcpPort = signal<number | null>(null);
   readonly localPeerId = signal<string | null>(null);
@@ -94,7 +96,7 @@ export class AppComponent implements OnInit {
     this.activeTab.set('transfers');
   }
 
-  setTab(tab: 'peers' | 'transfers' | 'settings'): void {
+  setTab(tab: 'peers' | 'transfers' | 'settings' | 'logs'): void {
     this.activeTab.set(tab);
   }
 

@@ -162,16 +162,67 @@ pub struct TcpMsgEnvelope {
     pub msg_type: TcpMsgType,
 }
 
-/// Enum que representa cualquier mensaje TCP deserializado
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "msg_type", rename_all = "snake_case")]
-pub enum TcpMessage {
-    TransferAnnounce(TransferAnnounce),
-    TransferAccepted(TransferAccepted),
-    TransferRejected(TransferRejected),
-    ChunkRequest(ChunkRequest),
-    ChunkResponse(ChunkResponse),
-    HaveChunk(HaveChunk),
-    TransferComplete(TransferComplete),
-    TransferError(TransferError),
+// NOTA: NO usar un enum con #[serde(tag = "msg_type")] para despachar mensajes
+// entrantes. Serde consume el campo tag al elegir la variante, y como los structs
+// concretos también declaran msg_type como campo obligatorio, la deserialización
+// interna falla con "missing field msg_type" para TODOS los mensajes. El despacho
+// correcto es: deserializar TcpMsgEnvelope primero y re-parsear el struct completo
+// desde los mismos bytes (ver receiver::handle_incoming_connection).
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Protege el contrato de wire: el sender serializa los structs concretos
+    /// (con su campo msg_type) y el receptor despacha leyendo primero el envelope
+    /// y luego re-deserializando el struct completo desde los mismos bytes.
+    #[test]
+    fn envelope_dispatch_desde_struct_concreto() {
+        let announce = TransferAnnounce {
+            msg_type: TcpMsgType::TransferAnnounce,
+            transfer_id: "t-1".into(),
+            sender_peer_id: "uuid-sender".into(),
+            sender_ip: "192.168.1.10".into(),
+            file_name: "instalador.exe".into(),
+            file_size: 2_097_152,
+            total_chunks: 2,
+            chunk_size: 1_048_576,
+            chunk_hashes: vec!["aaa".into(), "bbb".into()],
+            destination_path: "C:\\Descargas".into(),
+            swarm: vec![],
+        };
+        let bytes = serde_json::to_vec(&announce).unwrap();
+
+        let env: TcpMsgEnvelope = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(env.msg_type, TcpMsgType::TransferAnnounce);
+
+        let parsed: TransferAnnounce = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed.transfer_id, announce.transfer_id);
+        assert_eq!(parsed.chunk_hashes, announce.chunk_hashes);
+    }
+
+    /// Igual que el anterior pero para HaveChunk, incluyendo compatibilidad con
+    /// mensajes de versiones viejas que no traían ip/tcp_port.
+    #[test]
+    fn envelope_dispatch_have_chunk_y_compat() {
+        let have = HaveChunk {
+            msg_type: TcpMsgType::HaveChunk,
+            transfer_id: "t-1".into(),
+            peer_id: "uuid-r1".into(),
+            ip: "192.168.1.20".into(),
+            tcp_port: 47833,
+            chunk_index: 3,
+        };
+        let bytes = serde_json::to_vec(&have).unwrap();
+        let env: TcpMsgEnvelope = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(env.msg_type, TcpMsgType::HaveChunk);
+        let parsed: HaveChunk = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed.tcp_port, 47833);
+
+        // Mensaje viejo sin ip/tcp_port: debe deserializar con defaults
+        let viejo = r#"{"msg_type":"have_chunk","transfer_id":"t-1","peer_id":"p","chunk_index":0}"#;
+        let parsed_viejo: HaveChunk = serde_json::from_str(viejo).unwrap();
+        assert_eq!(parsed_viejo.ip, "");
+        assert_eq!(parsed_viejo.tcp_port, 0);
+    }
 }

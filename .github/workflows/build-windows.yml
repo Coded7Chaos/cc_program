@@ -43,8 +43,15 @@ jobs:
       - name: Instalar dependencias del frontend
         run: pnpm install --frozen-lockfile
 
+      # Con createUpdaterArtifacts activado, tauri build necesita la llave de firma
+      # del updater aunque este workflow no publique release (solo genera artifacts CI).
       - name: Compilar y empaquetar (pnpm tauri build)
         run: pnpm tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # La llave se generó sin contraseña; string vacío = sin contraseña.
+          # (GitHub no permite secrets vacíos, por eso va hardcodeado aquí.)
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
 
       # Sube el instalador NSIS (.exe) y el MSI como artifacts descargables
       # desde la pestaña "Actions" del run, sección "Artifacts".

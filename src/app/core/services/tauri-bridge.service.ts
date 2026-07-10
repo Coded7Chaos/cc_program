@@ -88,6 +88,18 @@ export class TauriBridgeService {
     return invoke<void>('cancel_transfer', { transferId });
   }
 
+  // ─── Log Commands ───────────────────────────────────────────────────────────
+
+  async getAppLogs(maxLines = 500): Promise<string> {
+    if (!this.isTauri()) return 'Los logs solo están disponibles en la versión de escritorio.';
+    return invoke<string>('get_app_logs', { maxLines });
+  }
+
+  async getLogFilePath(): Promise<string> {
+    if (!this.isTauri()) return '';
+    return invoke<string>('get_log_file_path');
+  }
+
   // ─── Event Listeners ────────────────────────────────────────────────────────
 
   onPeerUpdated(callback: (peer: PeerEntry) => void): Promise<UnlistenFn> {

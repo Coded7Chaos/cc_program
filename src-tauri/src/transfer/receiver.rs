@@ -13,9 +13,9 @@ use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
-use crate::protocol::codec::{read_typed_frame, write_frame};
+use crate::protocol::codec::{read_frame, read_typed_frame, write_frame, CodecError};
 use crate::protocol::messages::{
-    ChunkRequest, ChunkResponse, HaveChunk, SwarmPeer, TcpMessage, TcpMsgType,
+    ChunkRequest, ChunkResponse, HaveChunk, SwarmPeer, TcpMsgEnvelope, TcpMsgType,
     TransferAccepted, TransferAnnounce,
 };
 use crate::state::{ActiveTransfer, AppState, TransferRole, TransferStatus};
@@ -37,25 +37,40 @@ pub async fn handle_incoming_connection(
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut buf_stream = BufStream::new(stream);
-    
-    // Leer el primer mensaje para identificar el propósito de la conexión
-    let (msg, _data): (TcpMessage, _) = read_typed_frame(&mut buf_stream).await?;
 
-    match msg {
-        TcpMessage::TransferAnnounce(announce) => {
+    // Leer el primer frame para identificar el propósito de la conexión.
+    // El sondeo del scanner abre y cierra la conexión sin enviar datos:
+    // eso NO es un error, es el mecanismo normal de descubrimiento.
+    let (header_bytes, _data) = match read_frame(&mut buf_stream).await {
+        Ok(frame) => frame,
+        Err(CodecError::ConnectionClosed) => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Despacho en dos pasos: primero solo el msg_type (envelope), después el struct
+    // completo desde los MISMOS bytes. No usar un enum con #[serde(tag = "msg_type")]:
+    // serde consume el campo tag y el struct interno (que también declara msg_type)
+    // falla con "missing field msg_type" — ningún mensaje entrante se procesaría.
+    let envelope: TcpMsgEnvelope = serde_json::from_slice(&header_bytes)?;
+
+    match envelope.msg_type {
+        TcpMsgType::TransferAnnounce => {
+            let announce: TransferAnnounce = serde_json::from_slice(&header_bytes)?;
             info!("--- NUEVA TRANSFERENCIA ENTRANTE ---");
             handle_transfer_announce(announce, buf_stream, state, app_handle).await
         }
-        TcpMessage::ChunkRequest(req) => {
+        TcpMsgType::ChunkRequest => {
+            let req: ChunkRequest = serde_json::from_slice(&header_bytes)?;
             debug!("Solicitud de chunk recibida: idx {} de {}", req.chunk_index, req.requester_id);
             handle_chunk_request(req, buf_stream, state).await
         }
-        TcpMessage::HaveChunk(have) => {
+        TcpMsgType::HaveChunk => {
+            let have: HaveChunk = serde_json::from_slice(&header_bytes)?;
             debug!("Notificación HAVE recibida: chunk {} de {}", have.chunk_index, have.peer_id);
             handle_have_chunk(have, state).await
         }
-        _ => {
-            warn!("Mensaje TCP no reconocido o fuera de contexto");
+        other => {
+            warn!("Mensaje TCP no esperado como primer frame de una conexión: {:?}", other);
             Ok(())
         }
     }
@@ -96,12 +111,9 @@ async fn handle_transfer_announce(
     // 2. Preparar el archivo local
     let dest_path = Path::new(&announce.destination_path).join(&announce.file_name);
     info!("[receiver] Pre-asignando {} bytes en disco: {:?}", announce.file_size, dest_path);
-    if let Err(e) = preallocate_file(&dest_path, announce.file_size) {
-        error!("[receiver] Error al pre-asignar archivo: {} — verifica que el directorio exista y tengas permisos", e);
-    }
 
     // 3. Registrar estado de la transferencia
-    let active = ActiveTransfer {
+    let mut active = ActiveTransfer {
         transfer_id: announce.transfer_id.clone(),
         file_name: announce.file_name.clone(),
         file_path: dest_path.to_string_lossy().to_string(),
@@ -120,6 +132,30 @@ async fn handle_transfer_announce(
         bytes_transferred: 0,
         started_at: current_epoch(),
     };
+
+    // Si no se puede crear el archivo destino no tiene sentido descargar nada:
+    // se registra la transferencia como Failed para que el usuario VEA el problema
+    // (antes se seguía adelante y cada escritura de chunk fallaba en silencio).
+    if let Err(e) = preallocate_file(&dest_path, announce.file_size) {
+        let msg = format!(
+            "No se pudo crear el archivo destino {:?}: {}. Verifica que la ruta exista y que tengas permisos de escritura.",
+            dest_path, e
+        );
+        error!("[receiver] {}", msg);
+        active.status = TransferStatus::Failed(msg.clone());
+        state.active_transfers.insert(announce.transfer_id.clone(), active.clone());
+        let _ = app_handle.emit("transfer-incoming", &active);
+        let _ = app_handle.emit(
+            "transfer-error",
+            serde_json::json!({ "transfer_id": announce.transfer_id, "error": msg }),
+        );
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return Ok(());
+    }
+
     state.active_transfers.insert(announce.transfer_id.clone(), active.clone());
     let _ = app_handle.emit("transfer-incoming", &active);
 
